@@ -60,6 +60,9 @@ class NIdevice:
 
     def stop(self):
         self.task.stop_acq()
+
+    def clear_Q(self):
+        # This is legacy code, should not be used in the future.
         self.input_data = np.empty((len(self.task.inputs), self.task.blocks * self.blocksize))
         block = 0
         while self.Q.unfinished_tasks > 0:
