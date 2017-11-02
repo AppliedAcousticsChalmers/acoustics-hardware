@@ -29,8 +29,10 @@ class NIdevice:
             raise ValueError('No such device available') # TODO: Create a shared set of exceptions
         self.device = device
         self.task = CallbackTask(device)
+        # We need to set these values for the task directly before we do it through the setter.
+        # task.set_timing cannot run before channels have been added.
         self.task.fs = nidaqmx.system.System.local().devices[device].ai_max_single_chan_rate
-        self.blocksize = 1000 # TODO: Make sure that this value is OK!
+        self.task.blocksize = 1000 # TODO: Make sure that this value is OK!
 
     @property
     def fs(self):
