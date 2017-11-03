@@ -1,13 +1,13 @@
 # import numpy as np
 # from threading import Event
 
-from utils import LevelDetector
+from .utils import LevelDetector
 
 
 class RMSTrigger:
     def __init__(self, *, level, channel, action, kind='Above', **kwargs):
 
-        self.level_detector = LevelDetector(channel=channel, **kwargs)
+        self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
         self.action = action
         self.kind = kind
         self.trigger_level = level

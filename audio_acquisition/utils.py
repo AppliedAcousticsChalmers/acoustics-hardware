@@ -2,7 +2,7 @@ import numpy as np
 
 
 class LevelDetector:
-    def __init__(self, channel, fs=None, time_constant=None, attack_time=None, release_time=None):
+    def __init__(self, *, channel, fs=None, time_constant=None, attack_time=None, release_time=None):
         self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
         if attack_time is not None and release_time is not None:
             # separate attack and release times specified, used them
