@@ -5,7 +5,7 @@ from .utils import LevelDetector
 
 
 class RMSTrigger:
-    def __init__(self, *, level, channel, action, kind='Above', **kwargs):
+    def __init__(self, *, level, channel, action, fs, kind='Above', **kwargs):
 
         self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
         self.action = action
