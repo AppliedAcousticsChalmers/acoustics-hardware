@@ -12,6 +12,7 @@ class DeviceHandler (Thread):
     def __init__(self, device):
         # TODO: Enble shared stop events between multiple devices?
         # Or is it better to handle that with some kind of TriggerHandler
+        Thread.__init__(self)
         self.device = device
         self.trigger_handler = TriggerHandler(self.device.Q)
         self.queue_handler = QHandler(self.trigger_handler.buffer)
@@ -36,6 +37,7 @@ class DeviceHandler (Thread):
 
 class TriggerHandler (Thread):
     def __init__(self, inQ):
+        Thread.__init__(self)
         self._rawQ = inQ
         self.buffer = deque(maxlen=10)
 
@@ -77,6 +79,7 @@ class QHandler (Thread):
     timeout = 1  # Global for all QHandlers, specifies how often the stop event will be checked
 
     def __init__(self, buffer):
+        Thread.__init__(self)
         self.buffer = buffer
         self.queues = []
         self.trigger = Event()  # This is the event that should be handed to trigger objects to controll the data flow
