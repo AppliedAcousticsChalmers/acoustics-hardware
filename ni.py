@@ -1,19 +1,95 @@
 from queue import Queue
-from threading import Event, current_thread
+from threading import Event, Thread
 import numpy as np
 
 import nidaqmx
 from nidaqmx.stream_readers import AnalogMultiChannelReader
 
 
-def getAvailableDevices():
+def getDevices(name=None):
     system = nidaqmx.system.System.local()
-    return [dev.name for dev in system.devices]
+    name_list = [dev.name for dev in system.devices]
+    if name is None:
+        return name_list
+    else:
+        if len(name) == 0:
+            name = name_list[0]
+        if name[:4] == 'cDAQ' and name[5:8] != 'Mod':
+            name = [x for x in name_list if x[:8] == name[:5]+'Mod'][0]
+        return name
 
+class NIDevice (Thread):
+    def __init__(self, device=''):
+        Thread.__init__(self)
+        self.device = getDevices(device)
+        self.fs =  nidaqmx.system.System.local().devices[self.device].ai_max_single_chan_rate
+        self.blocksize = 1000  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
+        self.task = nidaqmx.Task()
+        self.Q = Queue()
+        self.inputs = []
+
+        # Binds the task stop function to the device stop command. 
+        # This works but there seems to be no possibility of waiting.
+        # If the thread waits for the task using task.wait_until_done the callback will not execute while waiting, and the stop command does nothing
+        # If the thread does not wait for the task, the thread finishes. The stop command still works and the task runs, but NIDevice.join will do nothing.
+        # self.stop = self.task.stop
+        # Binds an event set to the device stop command
+        # Using this we can instead use event.wait and just stop the task afterwards.
+        self._stop_event = Event()
+        self.stop = self._stop_event.set 
+
+        # TODO: Enable ni output devices
+        # TODO: Enable ni simulaneous input/output devices
+        # TODO: Enable syncronized ni devices
+
+    @property
+    def max_inputchannels(self):
+        return len(nidaqmx.system.System.local().devices[self.device].ai_physical_chans)
+
+    @property
+    def max_outputchannels(self):
+        return len(nidaqmx.system.System.local().devices[self.device].ao_physical_chans)
+
+    def add_input(self,idx):
+        # TODO: Maybe some kind af assertion that the idx is OK?
+        if idx in self.inputs:
+            # TODO: Raise a warning?
+            return
+        
+        # TODO: Make sure that the min/max values are ok for this device
+        # TODO: Make the min/max values configureable at a per channel basis
+        min_val = -10
+        max_val = 10
+        self.task.ai_channels.add_ai_voltage_chan(self.device+'/ai{}'.format(idx), min_val=min_val, max_val=max_val)         
+        self.inputs.append(idx)
+
+    def run(self):
+        self.task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan = self.blocksize,
+                sample_mode = nidaqmx.constants.AcquisitionType.CONTINUOUS)
+        reader = AnalogMultiChannelReader(self.task.in_stream)
+        databuffer = np.empty((len(self.inputs), self.blocksize))
+        #self.blocks = 0  # This fills no purpose anymore
+        def input_callback(task_handle, every_n_samples_event_type,
+                number_of_samples, callback_data):
+            sampsRead = reader.read_many_sample(databuffer, self.blocksize)
+            self.Q.put(databuffer.copy())
+            #self.blocks += 1
+            return 0
+        # I think that we don't need to unregistrer callbacks before, since the thread can only run once.
+        self.task.register_every_n_samples_acquired_into_buffer_event(self.blocksize, input_callback)
+        print('Starting task!')
+        self.task.start()
+        print('Waiting...')
+        self._stop_event.wait()
+        print('Stopping!')
+        self.task.stop()
+        print('Waiting for task...')
+        self.task.wait_until_done(timeout=10)  #nidaqmx.constants.WAIT_INFINITELY
+        print('Returning!')
 
 class NIdevice:
     def __init__(self, device=''):
-        devs = getAvailableDevices()
+        devs = getDevices()
         # Check if device is empty/none and choose the first module of the first connected device
         if device is None or len(device) == 0:
             device = devs[0]
