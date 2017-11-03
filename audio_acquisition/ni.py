@@ -1,10 +1,12 @@
 from queue import Queue
 from threading import Event, Thread
 import numpy as np
+import logging
 
 import nidaqmx
 from nidaqmx.stream_readers import AnalogMultiChannelReader
 
+logger = logging.getLogger(__name__)
 
 def getDevices(name=None):
     system = nidaqmx.system.System.local()
@@ -64,16 +66,19 @@ class NIDevice (Thread):
         self.inputs.append(idx)
 
     def run(self):
+        logger.info('Device started')
         self.task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan = self.blocksize,
                 sample_mode = nidaqmx.constants.AcquisitionType.CONTINUOUS)
         reader = AnalogMultiChannelReader(self.task.in_stream)
         databuffer = np.empty((len(self.inputs), self.blocksize))
-        #self.blocks = 0  # This fills no purpose anymore
+        self.blocks = 0  # This fills no purpose anymore
         def input_callback(task_handle, every_n_samples_event_type,
                 number_of_samples, callback_data):
             sampsRead = reader.read_many_sample(databuffer, self.blocksize)
+            # logger.debug('Block {} in device callback'.format(self.block))
+            # print('Block {} in device callback'.format(self.block))
             self.Q.put(databuffer.copy())
-            #self.blocks += 1
+            self.blocks += 1
             return 0
         # I think that we don't need to unregistrer callbacks before, since the thread can only run once.
         self.task.register_every_n_samples_acquired_into_buffer_event(self.blocksize, input_callback)
@@ -81,11 +86,14 @@ class NIDevice (Thread):
         self.task.start()
         # print('Waiting...')
         self._stop_event.wait()
+        logger.info('Device stopped')
         # print('Stopping!')
         self.task.stop()
         # print('Waiting for task...')
         self.task.wait_until_done(timeout=10)  #nidaqmx.constants.WAIT_INFINITELY
-        # print('Returning!')
+        self.task.close()  # Safety precaution, might not be nessassary
+        # I got an error about not closing tasks once, so now we close them
+        logger.info('Device returning!')
 
 class NIdevice:
     def __init__(self, device=''):

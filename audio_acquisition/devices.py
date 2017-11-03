@@ -1,6 +1,10 @@
-from queue import Queue
+from queue import Queue, Empty
 from threading import Event, Thread
 from collections import deque
+import logging
+from time import sleep
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceHandler (Thread):
@@ -20,22 +24,32 @@ class DeviceHandler (Thread):
         self.stop = self._stop_event.set
 
     def run(self):
+        logger.info('DeviceHandler started')
         # Start the device, the TriggerHandler, and the QHandler
         self.device.start()
         self.trigger_handler.start()
         self.queue_handler.start()
         # Wait for a stop signal
         self._stop_event.wait()
+        logger.info('DeviceHandler stopped')
         # Signal the device to stop
+        logger.info('Stopping device')
         self.device.stop()
+        logger.info('Joining device')
+        self.device.join()
         # Signal the TriggerHandler to stop, wait for it to complete before returning
+        logger.info('Stopping TriggerHandler')
         self.trigger_handler.stop()
+        logger.info('Joining TriggerHandler')
         self.trigger_handler.join()
+        logger.info('Stopping QHandler')
         self.queue_handler.stop()
+        logger.info('Joining QHandler')
         self.queue_handler.join()
 
 
 class TriggerHandler (Thread):
+    timeout = 1
     def __init__(self, inQ):
         Thread.__init__(self)
         self._rawQ = inQ
@@ -50,13 +64,24 @@ class TriggerHandler (Thread):
         # self.start_triggers = []  # Holds the triggers that are registred to start the data flow
         # self.stop_triggers = []  # Hold the triggers that will stop the data flow
 
+        self.blocks = 0
         self._stop_event = Event()  # Used to stop the Handler itself, not intended for extenal use.
         self.stop = self._stop_event.set
 
     def run(self):
+        logger.info('TriggerHandler started')
         while not self._stop_event.is_set():
             # Get one block from the input queue
-            this_block = self._rawQ.get()  # Note that this will block until there are stuff in the Q. That means that the actual device object needs to put stuff in the Q from a separate thread.
+            logger.debug('Fetching block in TriggerHandler')
+            try:
+                this_block = self._rawQ.get(timeout=self.timeout)  # Note that this will block until there are stuff in the Q. That means that the actual device object needs to put stuff in the Q from a separate thread.
+            except Empty:
+                # Go directly to checking the stop event again
+                sleep(0.01)
+                continue
+            logger.debug('Block {} in TriggerHandler'.format(self.blocks))
+            self.blocks += 1
+            # logger.debug('Block fetched in TriggerHandler loop')
             # Check all trigger conditions for the current block
             for trig in self.triggers:
                 trig(this_block)
@@ -68,11 +93,16 @@ class TriggerHandler (Thread):
             # The trigger handler might also be attatched to a different device, which will desync the blocks and the index where the triggering happened is not meaningful anymore.
             # It's only possible to trigger partial blocks exactly if the data stream is triggered by itself.
         # At this point the stop function has been called, finalize then return
-        while self._rawQ.qsize() > 0:
-            this_block = self._rawQ.get()
+        logger.info('TriggerHandler stopped')
+        while True:
+            try:
+                this_block = self._rawQ.get(timeout=self.timeout)
+            except Empty:
+                break
             for trig in self.triggers:
                 trig(this_block)
             self.buffer.append(this_block)
+        logger.info('TriggerHandler returning')
 
 
 class QHandler (Thread):
@@ -83,24 +113,34 @@ class QHandler (Thread):
         self.buffer = buffer
         self.queues = []
         self.trigger = Event()  # This is the event that should be handed to trigger objects to controll the data flow
+        self.blocks = 0
 
         self._stop_event = Event()  # Used to stop the Handler itself, not intended for extenal use.
         self.stop = self._stop_event.set
 
     def run(self):
+        logger.info('QHandler started')
         while not self._stop_event.is_set():
             # Waits for the trigger to be true
-            if self.trigger.wait(QHandler.timeout):
+            logger.debug('Waiting for trigger in QHandler')
+            if self.trigger.wait(timeout=self.timeout):
                 # If we timeout trigger.wait this part will not run, but the stop event will be checked
-                while len(self.buffer) > 0:
+                #while len(self.buffer) > 0:
+                try:
                     # There's stuff from the device, move it to the output Qs
                     this_block = self.buffer.pop()
-                    for Q in self.queues:
-                        # TODO: This will break if the items from the device are immutable, i.e does not have (or need) a copy method
-                        # Is it a problem if the consumers are handed the same object?
-                        Q.put(this_block.copy())
+                except IndexError:
+                    sleep(0.01)
+                    continue
+                logger.debug('Block {} in QHandler'.format(self.blocks))
+                self.blocks += 1
+                for Q in self.queues:
+                    # TODO: This will break if the items from the device are immutable, i.e does not have (or need) a copy method
+                    # Is it a problem if the consumers are handed the same object?
+                    Q.put(this_block)
+        logger.info('QHandler stopped')
         # At this point the stop function has been called, finalize and return
-        if self.trigger.wait(QHandler.timeout):
+        if self.trigger.wait(timeout=self.timeout):
                 # If we timeout trigger.wait this part will not run
                 while len(self.buffer) > 0:
                     # There's stuff from the device, move it to the output Qs
@@ -109,3 +149,4 @@ class QHandler (Thread):
                         # TODO: This will break if the items from the device are immutable, i.e does not have (or need) a copy method
                         # Is it a problem if the consumers are handed the same object?
                         Q.put(this_block.copy())
+        logger.info('QHandler returning')

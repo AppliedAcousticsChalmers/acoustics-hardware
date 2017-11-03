@@ -30,7 +30,7 @@ class LevelDetector:
         # TODO: Make the function configurable, e.g. abs() or **2 etc.
         input_levels = np.abs(block[self.channel])
         output_levels = np.empty_like(input_levels)
-        level = self.curent_level  # Get the level after the privious block
+        level = self.current_level  # Get the level after the privious block
         for idx in range(len(input_levels)):
             if input_levels[idx] > level:
                 level = self._attack_constant * input_levels[idx] + (1 - self._attack_constant) * level

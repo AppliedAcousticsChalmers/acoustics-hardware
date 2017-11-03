@@ -1,8 +1,10 @@
 # import numpy as np
 # from threading import Event
+import logging
 
 from .utils import LevelDetector
 
+logger = logging.getLogger(__name__)
 
 class RMSTrigger:
     def __init__(self, *, level, channel, action, fs, kind='Above', **kwargs):
@@ -20,12 +22,13 @@ class RMSTrigger:
     # filters we might want to use.
     def __call__(self, block):
         # trigger_on = self._event.is_set()
+        logger.debug('RMSTrigger called!')
         levels = self.level_detector(block)
 
         # This will switch the state if the trigger level is passed at least once
         # It should be more robust for transients: If there is a transient that turns on the triggering
         # we do not care if the level dropped afterwards.
-        if any(self._kind_sign * levels > self.level * self._kind_sign):
+        if any(self._kind_sign * levels > self.trigger_level * self._kind_sign):
             self.action()
 
     @property
