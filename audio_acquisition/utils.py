@@ -1,7 +1,24 @@
 import numpy as np
+from scipy.signal import lfilter
 
 
 class LevelDetector:
+    def __init__(self, *, channel, fs, time_constant=50e-3):
+        self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
+        self.time_constant = time_constant
+
+        # TODO: Multichannel level detector?
+        
+        self.channel = channel
+        self.current_level = np.atleast_1d(0)
+    def __call__(self, block):
+        # TODO: Enable custom mappings?
+        # Squared input level is tracked in order for the RMS trigger to work properly.
+        input_levels = block[self.channel]**2
+        output_levels, self.current_level = lfilter([self.time_constant], [1, self.time_constant-1], input_levels, zi=self.current_level)
+        return output_levels**0.5
+
+class LevelDetectorAttackRelease:
     def __init__(self, *, channel, fs, time_constant=None, attack_time=None, release_time=None):
         self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
         if attack_time is not None and release_time is not None:
