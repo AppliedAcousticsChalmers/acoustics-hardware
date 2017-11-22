@@ -1,5 +1,6 @@
-from threading import Thread, Event
+# from threading import Thread, Event
 from serial import Serial
+import schunk
 
 
 def getDevices(name=None):
@@ -28,7 +29,7 @@ def getDevices(name=None):
 
 class SerialInstrument:# (Thread):
 	def __init__(self, device=''):
-		Thread.__init__(self)
+		# Thread.__init__(self)
 		self.device = getDevices(device)
 		self.ser = Serial(port=self.device, timeout=1, dsrdtr=True)
 		self._write('system:remote')
@@ -67,3 +68,28 @@ class SerialInstrument:# (Thread):
 			amplitude = self.amplitude
 		self._write('apply:sin {}, {}'.format(frequency, amplitude))
 
+class VariSphere:
+	def __init__(self, az_port='COM1', el_port='COM2'):
+		self.az = schunk.Module(schunk.SerialConnection(
+			0x0B, Serial, port=az_port, baudrate=9600, timeout=1))
+		self.el = schunk.Module(schunk.SerialConnection(
+			0x0B, Serial, port=el_port, baudrate=9600, timeout=1))
+
+	def move(self, az, el):
+		self.az.move_pos(az)
+		self.el.move_pos(el)
+
+	def move_blocking(self, az, el):
+		self.move(az, el)
+		self.wait()
+
+	def stop(self):
+		self.az.stop()
+		self.el.stop()
+
+	def wait(self):
+		self.az.wait_until_position_reached()
+		self.el.wait_until_position_reached()
+
+	def reset(self):
+		self.move(0,0)
