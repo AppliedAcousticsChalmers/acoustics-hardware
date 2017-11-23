@@ -80,7 +80,7 @@ class HDFWriter:
         #     data.shape = (1, -1)
         #     shape = data.shape
         if self.dataset is None:
-            self.create_dataset(ndim=data.ndim)
+            self.create_dataset(ndim=data.ndim, chunks=data.shape)
 
         for idx in range(data.ndim):
             ax = self.head.size - data.ndim + idx
