@@ -35,13 +35,13 @@ class HDFWriter:
             group = '/'
         self.group = self.file.require_group(group)
 
-    def create_dataset(self, dataset=None, ndim=2, **kwargs):
-        if dataset is None:
-            dataset = 'data'  # Default name for sets
+    def create_dataset(self, name=None, ndim=2, **kwargs):
+        if name is None:
+            name = 'data'  # Default name for sets
         kwargs.setdefault('shape', ndim * (1,))
         kwargs.setdefault('maxshape', ndim * (None,))
         kwargs.setdefault('dtype', 'float64')
-        self.dataset = self.group.create_dataset(dataset, **kwargs)
+        self.dataset = self.group.create_dataset(name=name, **kwargs)
         self.head = np.array(ndim * (0,))
         self.data_shape = None
 
