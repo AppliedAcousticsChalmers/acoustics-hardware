@@ -3,6 +3,7 @@ from threading import Event, Thread
 from collections import deque
 import logging
 from time import sleep
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,11 @@ class DeviceHandler (Thread):
 
     def run(self):
         logger.info('DeviceHandler started')
-        # Start the device, the TriggerHandler, and the QHandler
+        # TODO: Do we want to check if the device is a NIDevice?
+        # Will all devices have the possibility to have unscaled reads?
+        if self.device.dtype != 'float64':
+            self.trigger_handler.trigger_scaling = np.array(self.device.scaling_coeffs())[:,1].reshape((-1,1))
+        # Start the device, the TriggerHandler, and the QHandler    
         self.device.start()
         self.trigger_handler.start()
         self.queue_handler.start()
@@ -56,6 +61,7 @@ class TriggerHandler (Thread):
         self.buffer = deque(maxlen=10)
         self.Q = Queue()
 
+        self.trigger_scaling = 1  # Scales the data from the device with this factor. Is mainly used to scale unscaled measurements
         self.running = False
         self.triggers = []  # Holds the Triggers that should be triggered from the data flowing in to the handler.
         self.trigger = Event()
@@ -86,7 +92,7 @@ class TriggerHandler (Thread):
             # logger.debug('Block fetched in TriggerHandler loop')
             # Check all trigger conditions for the current block
             for trig in self.triggers:
-                trig(this_block)
+                trig(this_block * self.trigger_scaling)
             self.buffer.append(this_block)
             # TODO: properply implement pre- and post-triggering both ways
             if self.trigger.is_set():

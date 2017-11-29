@@ -22,6 +22,10 @@ def calibrate(device_handler, channel, frequency=1e3, rms=1):
         except queue.Empty:
             break
     data = np.array([block[channel] for block in data]).reshape(-1)
+    if device_handler.device.dtype != 'float64':
+        coeffs = device_handler.device.scaling_coeffs(channel)
+        assert len(coeffs) < 3
+        data = coeffs[0] + coeffs[1] * data
     # Filter around the specified frequency
     wn = frequency / device_handler.device.fs * 2 * np.array([0.8, 1.2])
     lpf = butter(2, wn, btype='bandpass')
