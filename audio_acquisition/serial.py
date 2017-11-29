@@ -20,7 +20,7 @@ def getDevices(name=None):
 			return dev.device
 	# Try name as a serial device name
 	for dev in devs:
-		if dev.descrption.lower().find(name.lower()) > 0:
+		if dev.description.lower().find(name.lower()) >= 0:
 			return dev.device
 	# TODO: Any smart way to check for instrument name?
 	# This would require us to open a connection for all devs and query for a identifier

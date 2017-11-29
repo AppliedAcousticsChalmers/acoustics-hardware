@@ -21,11 +21,15 @@ def getDevices(name=None):
         return name
 
 class NIDevice (Thread):
-    def __init__(self, device=''):
+    def __init__(self, device='', fs=None, blocksize=10000, dtype='float64'):
         Thread.__init__(self)
         self.device = getDevices(device)
-        self.fs =  nidaqmx.system.System.local().devices[self.device].ai_max_single_chan_rate
-        self.blocksize = 1000  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
+        if fs is None:
+            self.fs =  nidaqmx.system.System.local().devices[self.device].ai_max_single_chan_rate
+        else:
+            self.fs = fs
+        self.blocksize = blocksize  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
+        self.dtype = dtype
         self.task = nidaqmx.Task()
         self.Q = Queue()
         self.inputs = []
