@@ -1,1 +1,1 @@
-# audio-acquisition-py
+# acoustics-hardware
