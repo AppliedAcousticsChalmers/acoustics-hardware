@@ -1,0 +1,9 @@
+name: acoustics_hardware_dev
+dependencies:
+  - numpy
+  - scipy
+  - matplotlib
+  - jupyter
+  - pip
+  - pip:
+    - -e .[hdf,ni,serial,motors]
