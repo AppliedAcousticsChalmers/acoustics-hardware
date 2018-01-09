@@ -44,9 +44,13 @@ class Device:
     def stop(self):
         self.__process_stop_event.set()
         self.__process.join()
+        self.__reset()
 
     def pause(self):
         self._hardware_pause()
+
+    def resume(self):
+        self._hardware_resume()
 
     def _hardware_run(self):
         '''
@@ -65,6 +69,14 @@ class Device:
         self._hardware_pause_event.set()
         self._hardware_stop_event.set()
 
+    def _hardware_reset(self):
+        '''
+        This method works in combination with `_hardware_stop` to put the hardware back to a state
+        where it can be started again.
+        '''
+        self._hardware_pause_event.clear()
+        self._hardware_stop_event.clear()
+
     def _hardware_pause(self):
         '''
         This is the primary method used for pausing the hardware. Pausing the hardware will not allow
@@ -73,6 +85,12 @@ class Device:
         Prefferably, paused hardware should not actually do any reads or writes at all.
         '''
         self._hardware_pause_event.set()
+
+    def _hardware_resume(self):
+        '''
+        This method works in combination with `_hardware_pause` to resume operation after a pause.
+        '''
+        self._hardware_pause_event.clear()
 
     def get_output_Q(self):
         if self.__process.is_alive():
@@ -104,6 +122,12 @@ class Device:
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.remove(trigger)
+
+    def __reset(self):
+        self.__process_stop_event.clear()
+        self.__trigger_stop_event.clear()
+        self.__q_stop_event.clear()
+        self._hardware_reset()
 
     def __process_target(self):
         # Start hardware in separate thread
