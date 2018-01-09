@@ -1,7 +1,7 @@
 import queue
 import threading
 import multiprocessing
-import collections.deque
+import collections
 import logging
 import numpy as np
 
@@ -24,13 +24,13 @@ class Device:
     def __init__(self):
         self.trigger = multiprocessing.Event()
 
-        self._hardware_Q = threading.Queue()
+        self._hardware_Q = queue.Queue()
         self._hardware_pause_event = multiprocessing.Event()
         self._hardware_stop_event = threading.Event()
 
         self.__triggers = []
         self.__Qs = []
-        self.__triggered_q = threading.Queue()
+        self.__triggered_q = queue.Queue()
 
         self.__process_stop_event = multiprocessing.Event()
         self.__trigger_stop_event = threading.Event()

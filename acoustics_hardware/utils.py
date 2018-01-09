@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import lfilter, butter
 import queue
-import threading.Timer
+import threading
 
 
 def calibrate(device_handler, channel, frequency=1e3, rms=1):
@@ -10,7 +10,7 @@ def calibrate(device_handler, channel, frequency=1e3, rms=1):
     Q = queue.Queue()
     device_handler.queue_handler.queues = [Q]
     # Measure for 5 seconds
-    timer = Timer(interval=5, function=device_handler.trigger_handler.trigger.clear)
+    timer = threading.Timer(interval=5, function=device_handler.trigger_handler.trigger.clear)
     device_handler.trigger_handler.trigger.set()
     timer.start()
     timer.join()

@@ -1,4 +1,4 @@
-import queue.Queue
+import queue
 import threading
 import numpy as np
 import logging
