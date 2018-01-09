@@ -1,10 +1,11 @@
 import numpy as np
 from scipy.signal import lfilter, butter
 import queue
-from threading import Timer
+import threading.Timer
+
 
 def calibrate(device_handler, channel, frequency=1e3, rms=1):
-    # Remove the existing output Qs and replace with out own
+    # Remove the existing output Qs and replace with our own
     old_Qs = device_handler.queue_handler.queues
     Q = queue.Queue()
     device_handler.queue_handler.queues = [Q]
@@ -34,7 +35,7 @@ def calibrate(device_handler, channel, frequency=1e3, rms=1):
     device_handler.queue_handler.queues = old_Qs
     # Return the normalized rms value
     RMS = (data_filtered**2).mean()**0.5
-    return RMS/rms
+    return RMS / rms
 
 
 class LevelDetector:
@@ -43,15 +44,16 @@ class LevelDetector:
         self.time_constant = time_constant
 
         # TODO: Multichannel level detector?
-        
         self.channel = channel
         self.current_level = np.atleast_1d(0)
+
     def __call__(self, block):
         # TODO: Enable custom mappings?
         # Squared input level is tracked in order for the RMS trigger to work properly.
         input_levels = block[self.channel]**2
-        output_levels, self.current_level = lfilter([self.time_constant], [1, self.time_constant-1], input_levels, zi=self.current_level)
+        output_levels, self.current_level = lfilter([self.time_constant], [1, self.time_constant - 1], input_levels, zi=self.current_level)
         return output_levels**0.5
+
 
 class LevelDetectorAttackRelease:
     def __init__(self, *, channel, fs, time_constant=None, attack_time=None, release_time=None):

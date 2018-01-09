@@ -1,12 +1,12 @@
-from queue import Queue
-from threading import Event, Thread
+import queue.Queue
+import threading
 import numpy as np
 import logging
 
 import nidaqmx
-from nidaqmx.stream_readers import AnalogMultiChannelReader, AnalogUnscaledReader
 
 logger = logging.getLogger(__name__)
+
 
 def getDevices(name=None):
     system = nidaqmx.system.System.local()
@@ -17,32 +17,33 @@ def getDevices(name=None):
         if len(name) == 0:
             name = name_list[0]
         if name[:4] == 'cDAQ' and name[5:8] != 'Mod':
-            name = [x for x in name_list if x[:8] == name[:5]+'Mod'][0]
+            name = [x for x in name_list if x[:8] == name[:5] + 'Mod'][0]
         return name
 
-class NIDevice (Thread):
+
+class NIDevice (threading.Thread):
     def __init__(self, device='', fs=None, blocksize=10000, dtype='float64'):
-        Thread.__init__(self)
+        threading.Thread.__init__(self)
         self.device = getDevices(device)
         if fs is None:
-            self.fs =  nidaqmx.system.System.local().devices[self.device].ai_max_single_chan_rate
+            self.fs = nidaqmx.system.System.local().devices[self.device].ai_max_single_chan_rate
         else:
             self.fs = fs
         self.blocksize = blocksize  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
         self.dtype = dtype
         self.task = nidaqmx.Task()
-        self.Q = Queue()
+        self.Q = queue.Queue()
         self.inputs = []
 
-        # Binds the task stop function to the device stop command. 
+        # Binds the task stop function to the device stop command.
         # This works but there seems to be no possibility of waiting.
         # If the thread waits for the task using task.wait_until_done the callback will not execute while waiting, and the stop command does nothing
         # If the thread does not wait for the task, the thread finishes. The stop command still works and the task runs, but NIDevice.join will do nothing.
         # self.stop = self.task.stop
         # Binds an event set to the device stop command
         # Using this we can instead use event.wait and just stop the task afterwards.
-        self._stop_event = Event()
-        self.stop = self._stop_event.set 
+        self._stop_event = threading.Event()
+        self.stop = self._stop_event.set
 
         # TODO: Enable ni output devices
         # TODO: Enable ni simulaneous input/output devices
@@ -59,7 +60,7 @@ class NIDevice (Thread):
     def input_range(self, channel=None):
         '''
         This is only an approximate value, do NOT use for calibrating unscaled readings
-        `channel` can be either None, which returns the overall device input range, of the 
+        `channel` can be either None, which returns the overall device input range, of the
         index of a physical channel
         '''
         if channel is None:
@@ -104,70 +105,75 @@ class NIDevice (Thread):
             #     ret_list.append(self.task.ai_channels[ch_idx].ai_dev_scaling_coeffs)
             # return ret_list
 
-    def add_input(self,idx, **kwargs):
+    def add_input(self, idx, **kwargs):
         # TODO: Maybe some kind af assertion that the idx is OK?
         if idx in self.inputs:
             # TODO: Raise a warning?
             return
-        
-        self.task.ai_channels.add_ai_voltage_chan(self.device+'/ai{}'.format(idx), **kwargs)         
+
+        self.task.ai_channels.add_ai_voltage_chan(self.device + '/ai{}'.format(idx), **kwargs)
         self.inputs.append(idx)
-        # We need to configure sampling behavior as soon as possible. 
-        # If the sampling behavior is not configured, we will get errors when attepting to 
+        # We need to configure sampling behavior as soon as possible.
+        # If the sampling behavior is not configured, we will get errors when attepting to
         # access properties from the task
-        self.task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan = self.blocksize,
-                sample_mode = nidaqmx.constants.AcquisitionType.CONTINUOUS)
+        self.task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.blocksize,
+                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
 
     def run(self):
         logger.info('Device started')
-        self.task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan = self.blocksize,
-                sample_mode = nidaqmx.constants.AcquisitionType.CONTINUOUS)
+        self.task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.blocksize,
+                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
         # reader = AnalogMultiChannelReader(self.task.in_stream)
         self.blocks_read = 0  # Is not strictly neccessary but could be useful at some point, e.g. debugging
         if self.dtype.lower() == 'unscaled' or self.dtype.lower() == 'int':
             wl = self.word_length()
             self.dtype = 'int{}'.format(int(wl))
         if self.dtype == 'int16':
-            reader = AnalogUnscaledReader(self.task.in_stream)
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self.task.in_stream)
             databuffer = np.empty((len(self.inputs), self.blocksize), dtype='int16')
+
             def input_callback(task_handle, every_n_samples_event_type,
-                    number_of_samples, callback_data):
+                               number_of_samples, callback_data):
                 sampsRead = reader.read_int16(databuffer, self.blocksize)
                 self.Q.put(databuffer.copy())
                 self.blocks_read += 1
                 return 0
         elif self.dtype == 'int32':
-            reader = AnalogUnscaledReader(self.task.in_stream)
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self.task.in_stream)
             databuffer = np.empty((len(self.inputs), self.blocksize), dtype='int32')
+
             def input_callback(task_handle, every_n_samples_event_type,
-                    number_of_samples, callback_data):
+                               number_of_samples, callback_data):
                 sampsRead = reader.read_int32(databuffer, self.blocksize)
                 self.Q.put(databuffer.copy())
                 self.blocks_read += 1
                 return 0
         elif self.dtype == 'uint16':
-            reader = AnalogUnscaledReader(self.task.in_stream)
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self.task.in_stream)
             databuffer = np.empty((len(self.inputs), self.blocksize), dtype='uint16')
+
             def input_callback(task_handle, every_n_samples_event_type,
-                    number_of_samples, callback_data):
+                               number_of_samples, callback_data):
                 sampsRead = reader.read_uint16(databuffer, self.blocksize)
                 self.Q.put(databuffer.copy())
                 self.blocks_read += 1
                 return 0
         elif self.dtype == 'uint32':
-            reader = AnalogUnscaledReader(self.task.in_stream)
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self.task.in_stream)
             databuffer = np.empty((len(self.inputs), self.blocksize), dtype='uint32')
+
             def input_callback(task_handle, every_n_samples_event_type,
-                    number_of_samples, callback_data):
+                               number_of_samples, callback_data):
                 sampsRead = reader.read_uint32(databuffer, self.blocksize)
                 self.Q.put(databuffer.copy())
                 self.blocks_read += 1
                 return 0
         else:  # Read as scaled float64
-            reader = AnalogMultiChannelReader(self.task.in_stream)
+            reader = nidaqmx.stream_readers.AnalogMultiChannelReader(self.task.in_stream)
             databuffer = np.empty((len(self.inputs), self.blocksize), dtype='float64')
+
             def input_callback(task_handle, every_n_samples_event_type,
-                    number_of_samples, callback_data):
+                               number_of_samples, callback_data):
                 sampsRead = reader.read_many_sample(databuffer, self.blocksize)
                 self.Q.put(databuffer.copy())
                 self.blocks_read += 1
@@ -182,10 +188,11 @@ class NIDevice (Thread):
         # print('Stopping!')
         self.task.stop()
         # print('Waiting for task...')
-        self.task.wait_until_done(timeout=10)  #nidaqmx.constants.WAIT_INFINITELY
+        self.task.wait_until_done(timeout=10)  # nidaqmx.constants.WAIT_INFINITELY
         self.task.close()  # Safety precaution, might not be nessassary
         # I got an error about not closing tasks once, so now we close them
         logger.info('Device returning!')
+
 
 class NIdevice:
     def __init__(self, device=''):
@@ -207,11 +214,12 @@ class NIdevice:
         # We need to set these values for the task directly before we do it through the setter.
         # task.set_timing cannot run before channels have been added.
         self.task.fs = nidaqmx.system.System.local().devices[device].ai_max_single_chan_rate
-        self.task.blocksize = 1000 # TODO: Make sure that this value is OK!
+        self.task.blocksize = 1000  # TODO: Make sure that this value is OK!
 
     @property
     def fs(self):
         return self.task.fs
+
     @fs.setter
     def fs(self, fs):
         self.task.set_timing(fs, self.blocksize)
@@ -219,6 +227,7 @@ class NIdevice:
     @property
     def blocksize(self):
         return self.task.blocksize
+
     @blocksize.setter
     def blocksize(self, blocksize):
         self.task.set_timing(self.fs, blocksize)
@@ -269,8 +278,8 @@ class CallbackTask(nidaqmx.Task):
         self.device = device
         self.inputs = []
         self.outputs = []
-        self.running = Event()
-        self.Q = Queue()
+        self.running = threading.Event()
+        self.Q = queue.Queue()
 
     @property
     def max_inputchannels(self):
@@ -281,8 +290,8 @@ class CallbackTask(nidaqmx.Task):
         return len(nidaqmx.system.System.local().devices[self.device].ao_physical_chans)
 
     def set_timing(self, fs, blocksize):
-        self.timing.cfg_samp_clk_timing(int(fs), samps_per_chan = blocksize,
-                sample_mode = nidaqmx.constants.AcquisitionType.CONTINUOUS)
+        self.timing.cfg_samp_clk_timing(int(fs), samps_per_chan=blocksize,
+                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
         self.fs = int(fs)
         self.blocksize = blocksize
 
@@ -303,11 +312,12 @@ class CallbackTask(nidaqmx.Task):
     def start_acq(self):
         # TODO: Check input and output channels and modify accordningly
         # if len(self.inputs) > 0:
-        self.reader = AnalogMultiChannelReader(self.in_stream)
+        self.reader = nidaqmx.stream_readers.AnalogMultiChannelReader(self.in_stream)
         self.databuffer = np.empty((len(self.inputs), self.blocksize))
         self.blocks = 0
+
         def input_callback(task_handle, every_n_samples_event_type,
-                number_of_samples, callback_data):
+                           number_of_samples, callback_data):
             # try:
             sampsRead = self.reader.read_many_sample(self.databuffer, self.blocksize)
             # except nidaqmx.DaqError as e:

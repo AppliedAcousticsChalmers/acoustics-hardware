@@ -1,14 +1,15 @@
 import numpy as np
-from threading import Event, Timer
+import threading
 import logging
 
 from .utils import LevelDetector
 
 logger = logging.getLogger(__name__)
 
+
 class Trigger:
     def __init__(self, action=None, false_action=None):
-        self.active = Event()
+        self.active = threading.Event()
         self.active.set()
 
         self.actions = []
@@ -28,7 +29,7 @@ class Trigger:
     def __call__(self, block):
         # We need to perform the test event if the triggering is disabled
         # Some triggers (RMSTrigger) needs to update their state continiously to work as intended
-        # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always 
+        # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
         # start form zero
         test = self.test(block)
         if self.active.is_set():
@@ -38,6 +39,10 @@ class Trigger:
                 [action() for action in self.actions]
             else:
                 [action() for action in self.false_actions]
+
+    def test(self, block):
+        raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
+
 
 class RMSTrigger(Trigger):
     def __init__(self, *, level, channel, fs, action=None, region='Above', **kwargs):
@@ -87,6 +92,7 @@ class RMSTrigger(Trigger):
         else:
             raise ValueError('{} not a valid regoin for RMS trigger.'.format(value))
 
+
 class PeakTrigger(Trigger):
     def __init__(self, *, level, channel, action, region='Above'):
         Trigger.__init__(self, action=action)
@@ -121,6 +127,7 @@ class PeakTrigger(Trigger):
         else:
             raise ValueError('{} not a valid region for peak trigger.'.format(value))
 
+
 class DelayedAction:
     def __init__(self, *, action, time):
         self.action = action
@@ -128,6 +135,6 @@ class DelayedAction:
         # self.timer = Timer(interval=time, function=action)
 
     def __call__(self):
-        timer = Timer(interval=self.time, function=self.action)
+        timer = threading.Timer(interval=self.time, function=self.action)
         timer.start()
         # self.timer.start()

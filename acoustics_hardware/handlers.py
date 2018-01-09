@@ -1,6 +1,6 @@
-from queue import Queue, Empty
-from threading import Event, Thread
-from collections import deque
+import queue
+import threading
+import collections.deque
 import logging
 from time import sleep
 import numpy as np
@@ -8,7 +8,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-class DeviceHandler (Thread):
+class DeviceHandler (threading.Thread):
     # TODO: rename this to something more suitable.
     # It should be possible to make this a sub-process using the multiprocessing module
     # It would require that we change some Events to multiprocessing.Event and some Queues to multiprocessing.Queue.
@@ -17,11 +17,11 @@ class DeviceHandler (Thread):
     def __init__(self, device):
         # TODO: Enble shared stop events between multiple devices?
         # Or is it better to handle that with some kind of TriggerHandler
-        Thread.__init__(self)
+        threading.Thread.__init__(self)
         self.device = device
         self.trigger_handler = TriggerHandler(self.device.Q)
         self.queue_handler = QHandler(self.trigger_handler.Q)
-        self._stop_event = Event()
+        self._stop_event = threading.Event()
         self.stop = self._stop_event.set
 
     def run(self):
@@ -29,8 +29,8 @@ class DeviceHandler (Thread):
         # TODO: Do we want to check if the device is a NIDevice?
         # Will all devices have the possibility to have unscaled reads?
         if self.device.dtype != 'float64':
-            self.trigger_handler.trigger_scaling = np.array(self.device.scaling_coeffs())[:,1].reshape((-1,1))
-        # Start the device, the TriggerHandler, and the QHandler    
+            self.trigger_handler.trigger_scaling = np.array(self.device.scaling_coeffs())[:, 1].reshape((-1, 1))
+        # Start the device, the TriggerHandler, and the QHandler
         self.device.start()
         self.trigger_handler.start()
         self.queue_handler.start()
@@ -53,18 +53,19 @@ class DeviceHandler (Thread):
         self.queue_handler.join()
 
 
-class TriggerHandler (Thread):
+class TriggerHandler (threading.Thread):
     timeout = 1
+
     def __init__(self, inQ):
-        Thread.__init__(self)
+        threading.Thread.__init__(self)
         self._rawQ = inQ
-        self.buffer = deque(maxlen=10)
-        self.Q = Queue()
+        self.buffer = collections.deque(maxlen=10)
+        self.Q = queue.Queue()
 
         self.trigger_scaling = 1  # Scales the data from the device with this factor. Is mainly used to scale unscaled measurements
         self.running = False
         self.triggers = []  # Holds the Triggers that should be triggered from the data flowing in to the handler.
-        self.trigger = Event()
+        self.trigger = threading.Event()
 
         self.pre_trigger = 0  # Specifies how much before the start trigger we will collect the data. Negative numbers indicate a delay in the aquisition start.
         self.post_trigger = 0  # Specifies how much after the stop trigger we will continue to collect the data. Negative numbers indicate that we stop before something happens, which will give a delay in the flow.
@@ -73,7 +74,7 @@ class TriggerHandler (Thread):
         # self.stop_triggers = []  # Hold the triggers that will stop the data flow
 
         self.blocks = 0
-        self._stop_event = Event()  # Used to stop the Handler itself, not intended for extenal use.
+        self._stop_event = threading.Event()  # Used to stop the Handler itself, not intended for extenal use.
         self.stop = self._stop_event.set
 
     def run(self):
@@ -83,7 +84,7 @@ class TriggerHandler (Thread):
             logger.debug('Fetching block in TriggerHandler')
             try:
                 this_block = self._rawQ.get(timeout=self.timeout)  # Note that this will block until there are stuff in the Q. That means that the actual device object needs to put stuff in the Q from a separate thread.
-            except Empty:
+            except queue.Empty:
                 # Go directly to checking the stop event again
                 # sleep(0.01)
                 continue
@@ -110,7 +111,7 @@ class TriggerHandler (Thread):
         while True:
             try:
                 this_block = self._rawQ.get(timeout=self.timeout)
-            except Empty:
+            except queue.Empty:
                 break
             for trig in self.triggers:
                 trig(this_block)
@@ -123,16 +124,16 @@ class TriggerHandler (Thread):
         logger.info('TriggerHandler returning')
 
 
-class QHandler (Thread):
+class QHandler (threading.Thread):
     timeout = 1  # Global for all QHandlers, specifies how often the stop event will be checked
 
     def __init__(self, Q):
-        Thread.__init__(self)
+        threading.thread.__init__(self)
         self._Q = Q
         self.queues = []
         self.blocks = 0
 
-        self._stop_event = Event()  # Used to stop the Handler itself, not intended for extenal use.
+        self._stop_event = threading.Event()  # Used to stop the Handler itself, not intended for extenal use.
         self.stop = self._stop_event.set
 
     def run(self):
@@ -142,7 +143,7 @@ class QHandler (Thread):
             logger.debug('Waiting for blocks in QHandler')
             try:
                 this_block = self._Q.get(timeout=self.timeout)
-            except Empty:
+            except queue.Empty:
                 continue
             for Q in self.queues:
                 Q.put(this_block)
@@ -166,7 +167,7 @@ class QHandler (Thread):
         while True:
             try:
                 this_block = self._Q.get(timeout=self.timeout)
-            except Empty:
+            except queue.Empty:
                 break
             for Q in self.queues:
                 Q.put(this_block)
