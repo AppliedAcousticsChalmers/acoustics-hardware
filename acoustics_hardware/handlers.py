@@ -126,7 +126,7 @@ class Device:
         self.__q_stop_event.set()
         q_thread.join()
 
-    def _t_rigger_target(self):
+    def __trigger_target(self):
         # TODO: Get buffer size depending on pre-trigger value
         data_buffer = collections.deque(maxlen=10)
 
@@ -136,7 +136,7 @@ class Device:
         while not self.__trigger_stop_event.is_set():
             # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
             try:
-                this_block = self._Q.get(timeout=self._trigger_timeout)
+                this_block = self._hardware_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 continue
             # Execute all triggering conditions
@@ -152,7 +152,7 @@ class Device:
         # The hardware should have stopped by now, analyze all remaining blocks.
         while True:
             try:
-                this_block = self.Q.get(timeout=self._trigger_timeout)
+                this_block = self._hardware_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 break
             for trig in self.__triggers:
@@ -162,7 +162,7 @@ class Device:
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
-    def _q_target(self):
+    def __q_target(self):
         while not self.__q_stop_event.is_set():
             # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
             try:
