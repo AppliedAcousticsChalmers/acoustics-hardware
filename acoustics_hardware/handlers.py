@@ -1,11 +1,186 @@
 import queue
 import threading
+import multiprocessing
 import collections.deque
 import logging
-from time import sleep
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+class Device:
+    """
+    Top level abstract Device class used for inheritance to implement specific hardware.
+    Required methods to implement:
+    - `run_hardware`
+
+    Optional methods to implement
+    - `stop_hardware`: The default implementation is `self.stop_hardware_event.set()`.
+      Either make `run_hardware` work with that, or implement a new stop method.
+    """
+    _trigger_timeout = 1
+    _q_timeout = 1
+
+    def __init__(self):
+        self.trigger = multiprocessing.Event()
+
+        self._hardware_Q = threading.Queue()
+        self._hardware_pause_event = multiprocessing.Event()
+        self._hardware_stop_event = threading.Event()
+
+        self.__triggers = []
+        self.__Qs = []
+        self.__triggered_q = threading.Queue()
+
+        self.__process_stop_event = multiprocessing.Event()
+        self.__trigger_stop_event = threading.Event()
+        self.__q_stop_event = threading.Event()
+        self.__process = multiprocessing.Process()
+
+    def start(self):
+        self.__process = multiprocessing.Process(target=self.__process_target)
+        self.__process.start()
+
+    def stop(self):
+        self.__process_stop_event.set()
+        self.__process.join()
+
+    def pause(self):
+        self._hardware_pause()
+
+    def _hardware_run(self):
+        '''
+        This is the primary method in which data processing should be implemented.
+        '''
+        raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
+
+    def _hardware_stop(self):
+        '''
+        This is the primary method used for stopping the hardware.
+        It is reccomended to do this using Events inside the _hardware_run method.
+        The default implementation is
+            self._hardware_pause_event.set()
+            self._hardware_stop_event.set()
+        '''
+        self._hardware_pause_event.set()
+        self._hardware_stop_event.set()
+
+    def _hardware_pause(self):
+        '''
+        This is the primary method used for pausing the hardware. Pausing the hardware will not allow
+        changes in the intra-process setup, e.g. triggers or queues, but can be used to pause the data
+        flow while waiting for something else.
+        Prefferably, paused hardware should not actually do any reads or writes at all.
+        '''
+        self._hardware_pause_event.set()
+
+    def get_output_Q(self):
+        if self.__process.is_alive():
+            # TODO: Custom warning class
+            raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            Q = multiprocessing.Queue()
+            self.__Qs.append(Q)
+            return Q
+
+    def remove_output_Q(self, Q):
+        if self.__process.is_alive():
+            # TODO: Custom warning class
+            raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            # TODO: What should happen if the Q is not in the list?
+            self.__Qs.remove(Q)
+
+    def register_trigger(self, trigger):
+        if self.__process.is_alive():
+            # TODO: Custom warning class
+            raise UserWarning('It is not possible to register new triggers while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__triggers.append(trigger)
+
+    def remove_trigger(self, trigger):
+        if self.__process.is_alive():
+            # TODO: Custom warning class
+            raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__triggers.remove(trigger)
+
+    def __process_target(self):
+        # Start hardware in separate thread
+        # Manage triggers in separate thread
+        # Manage Qs in separate thread
+        hardware_thread = threading.Thread(target=self._hardware_run)
+        trigger_thread = threading.Thread(target=self.__trigger_target)
+        q_thread = threading.Thread(target=self.__q_target)
+
+        hardware_thread.start()
+        trigger_thread.start()
+        q_thread.start()
+
+        self.__process_stop_event.wait()
+
+        self._hardware_stop()
+        hardware_thread.join()
+        self.__trigger_stop_event.set()
+        trigger_thread.join()
+        self.__q_stop_event.set()
+        q_thread.join()
+
+    def _t_rigger_target(self):
+        # TODO: Get buffer size depending on pre-trigger value
+        data_buffer = collections.deque(maxlen=10)
+
+        # TODO: Get trigger scaling if needed
+        trigger_scaling = 1
+
+        while not self.__trigger_stop_event.is_set():
+            # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
+            try:
+                this_block = self._Q.get(timeout=self._trigger_timeout)
+            except queue.Empty:
+                continue
+            # Execute all triggering conditions
+            for trig in self.__triggers:
+                trig(this_block * trigger_scaling)
+            # Move the block to the buffer
+            data_buffer.append(this_block)
+            # If the trigger is active, move everything from the data buffer to the triggered Q
+            if self.trigger.is_set():
+                while len(data_buffer) > 0:
+                    self.__triggered_q.put(data_buffer.popleft())
+
+        # The hardware should have stopped by now, analyze all remaining blocks.
+        while True:
+            try:
+                this_block = self.Q.get(timeout=self._trigger_timeout)
+            except queue.Empty:
+                break
+            for trig in self.__triggers:
+                trig(this_block * trigger_scaling)
+            data_buffer.append(this_block)
+            if self.trigger.is_set():
+                while len(data_buffer) > 0:
+                    self.__triggered_q.put(data_buffer.popleft())
+
+    def _q_target(self):
+        while not self.__q_stop_event.is_set():
+            # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
+            try:
+                this_block = self.__triggered_q.get(timeout=self._q_timeout)
+            except queue.Empty:
+                continue
+            for Q in self.__Qs:
+                # Copy the block to all output Qs
+                Q.put(this_block)
+
+        # The triggering should have stopped by now, move the remaining blocks.
+        while True:
+            try:
+                this_block = self.__triggered_q.get(timeout=self._q_timeout)
+            except queue.Empty:
+                break
+            for Q in self.__Qs:
+                Q.put(this_block)
 
 
 class DeviceHandler (threading.Thread):
