@@ -22,9 +22,11 @@ class Device:
     _q_timeout = 1
 
     def __init__(self):
-        self.trigger = multiprocessing.Event()
+        self.input_active = multiprocessing.Event()
+        self.output_active = multiprocessing.Event()
 
-        self._hardware_Q = queue.Queue()
+        self._hardware_input_Q = queue.Queue()
+        self._hardware_output_Q = multiprocessing.Queue()
         self._hardware_pause_event = multiprocessing.Event()
         self._hardware_stop_event = threading.Event()
 
@@ -92,7 +94,7 @@ class Device:
         '''
         self._hardware_pause_event.clear()
 
-    def get_output_Q(self):
+    def get_new_Q(self):
         if self.__process.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
@@ -101,13 +103,19 @@ class Device:
             self.__Qs.append(Q)
             return Q
 
-    def remove_output_Q(self, Q):
+    def remove_Q(self, Q):
         if self.__process.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
             # TODO: What should happen if the Q is not in the list?
             self.__Qs.remove(Q)
+
+    @property
+    def output_Q(self):
+        # TODO: Documentation
+        # This only exists to have consistent naming conventions (_hardware_input_Q, _hardware_output_Q) for subclassing
+        return self._hardware_output_Q
 
     def register_trigger(self, trigger):
         if self.__process.is_alive():
@@ -160,7 +168,7 @@ class Device:
         while not self.__trigger_stop_event.is_set():
             # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
             try:
-                this_block = self._hardware_Q.get(timeout=self._trigger_timeout)
+                this_block = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 continue
             # Execute all triggering conditions
@@ -169,20 +177,20 @@ class Device:
             # Move the block to the buffer
             data_buffer.append(this_block)
             # If the trigger is active, move everything from the data buffer to the triggered Q
-            if self.trigger.is_set():
+            if self.input_active.is_set():
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
         # The hardware should have stopped by now, analyze all remaining blocks.
         while True:
             try:
-                this_block = self._hardware_Q.get(timeout=self._trigger_timeout)
+                this_block = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 break
             for trig in self.__triggers:
                 trig(this_block * trigger_scaling)
             data_buffer.append(this_block)
-            if self.trigger.is_set():
+            if self.input_active.is_set():
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
