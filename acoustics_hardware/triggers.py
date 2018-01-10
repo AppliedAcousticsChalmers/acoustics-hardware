@@ -26,12 +26,12 @@ class Trigger:
             except TypeError:
                 self.false_actions.append(false_action)
 
-    def __call__(self, block):
+    def __call__(self, frame):
         # We need to perform the test event if the triggering is disabled
         # Some triggers (RMSTrigger) needs to update their state continiously to work as intended
         # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
         # start form zero
-        test = self.test(block)
+        test = self.test(frame)
         if self.active.is_set():
             # logger.debug('Testing in {}'.format(self.__class__.__name__))
             if test:
@@ -40,7 +40,7 @@ class Trigger:
             else:
                 [action() for action in self.false_actions]
 
-    def test(self, block):
+    def test(self, frame):
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
 
 
@@ -57,15 +57,15 @@ class RMSTrigger(Trigger):
     # It should also be possible (I think) to write the level detector using Faust, and just drop in the
     # wrapped Faust code here. If I manage to get that working it could also be used for all other crazy
     # filters we might want to use.
-    def test(self, block):
+    def test(self, frame):
         # logger.debug('Testing in RMS trigger')
-        levels = self.level_detector(block)
+        levels = self.level_detector(frame)
         return any(self._sign * levels > self.trigger_level * self._sign)
 
-    # def __call__(self, block):
+    # def __call__(self, frame):
     #     # trigger_on = self._event.is_set()
     #     # logger.debug('RMSTrigger called!')
-    #     levels = self.level_detector(block)
+    #     levels = self.level_detector(frame)
 
     #     # This will switch the state if the trigger level is passed at least once
     #     # It should be more robust for transients: If there is a transient that turns on the triggering
@@ -101,13 +101,13 @@ class PeakTrigger(Trigger):
         self.trigger_level = level
         self.channel = channel
 
-    def test(self, block):
+    def test(self, frame):
         # logger.debug('Testing in Peak triggger')
-        levels = np.abs(block[self.channel])
+        levels = np.abs(frame[self.channel])
         return any(self._sign * levels > self.trigger_level * self._sign)
 
-    # def __call__(self, block):
-    #     levels = np.abs(block[channel])
+    # def __call__(self, frame):
+    #     levels = np.abs(frame[channel])
     #     if any(self._sign * levels > self.trigger_level * self._sign):
     #         self.action()
 

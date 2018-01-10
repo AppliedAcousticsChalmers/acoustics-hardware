@@ -196,53 +196,53 @@ class Device:
         trigger_scaling = 1
 
         while not self.__trigger_stop_event.is_set():
-            # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
+            # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
-                this_block = self._hardware_input_Q.get(timeout=self._trigger_timeout)
+                this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 continue
             # Execute all triggering conditions
             for trig in self.__triggers:
-                trig(this_block * trigger_scaling)
-            # Move the block to the buffer
-            data_buffer.append(this_block)
+                trig(this_frame * trigger_scaling)
+            # Move the frame to the buffer
+            data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
             if self.input_active.is_set():
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
-        # The hardware should have stopped by now, analyze all remaining blocks.
+        # The hardware should have stopped by now, analyze all remaining frames.
         while True:
             try:
-                this_block = self._hardware_input_Q.get(timeout=self._trigger_timeout)
+                this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 break
             for trig in self.__triggers:
-                trig(this_block * trigger_scaling)
-            data_buffer.append(this_block)
+                trig(this_frame * trigger_scaling)
+            data_buffer.append(this_frame)
             if self.input_active.is_set():
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
     def __q_target(self):
         while not self.__q_stop_event.is_set():
-            # Wait for a block, if none has arrived within the set timeout, go back and check stop condition
+            # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
-                this_block = self.__triggered_q.get(timeout=self._q_timeout)
+                this_frame = self.__triggered_q.get(timeout=self._q_timeout)
             except queue.Empty:
                 continue
             for Q in self.__Qs:
-                # Copy the block to all output Qs
-                Q.put(this_block)
+                # Copy the frame to all output Qs
+                Q.put(this_frame)
 
-        # The triggering should have stopped by now, move the remaining blocks.
+        # The triggering should have stopped by now, move the remaining frames.
         while True:
             try:
-                this_block = self.__triggered_q.get(timeout=self._q_timeout)
+                this_frame = self.__triggered_q.get(timeout=self._q_timeout)
             except queue.Empty:
                 break
             for Q in self.__Qs:
-                Q.put(this_block)
+                Q.put(this_frame)
 
 
 class DeviceHandler (threading.Thread):
