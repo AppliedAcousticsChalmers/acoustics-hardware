@@ -2,49 +2,13 @@ import numpy as np
 import threading
 import logging
 
+from . import core
 from .utils import LevelDetector
 
 logger = logging.getLogger(__name__)
 
 
-class Trigger:
-    def __init__(self, action=None, false_action=None):
-        self.active = threading.Event()
-        self.active.set()
-
-        self.actions = []
-        if action is not None:
-            try:
-                self.actions.extend(action)
-            except TypeError:
-                self.actions.append(action)
-
-        self.false_actions = []
-        if false_action is not None:
-            try:
-                self.false_actions.extend(false_action)
-            except TypeError:
-                self.false_actions.append(false_action)
-
-    def __call__(self, frame):
-        # We need to perform the test event if the triggering is disabled
-        # Some triggers (RMSTrigger) needs to update their state continiously to work as intended
-        # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
-        # start form zero
-        test = self.test(frame)
-        if self.active.is_set():
-            # logger.debug('Testing in {}'.format(self.__class__.__name__))
-            if test:
-                logger.debug('Test conditions met in {}'.format(self.__class__.__name__))
-                [action() for action in self.actions]
-            else:
-                [action() for action in self.false_actions]
-
-    def test(self, frame):
-        raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
-
-
-class RMSTrigger(Trigger):
+class RMSTrigger(core.Trigger):
     def __init__(self, *, level, channel, fs, action=None, region='Above', **kwargs):
         Trigger.__init__(self, action=action)
         self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
@@ -93,7 +57,7 @@ class RMSTrigger(Trigger):
             raise ValueError('{} not a valid regoin for RMS trigger.'.format(value))
 
 
-class PeakTrigger(Trigger):
+class PeakTrigger(core.Trigger):
     def __init__(self, *, level, channel, action, region='Above'):
         Trigger.__init__(self, action=action)
         # self.action = action
