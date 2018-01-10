@@ -12,11 +12,16 @@ class Device:
     """
     Top level abstract Device class used for inheritance to implement specific hardware.
     Required methods to implement:
-    - `run_hardware`
+    - `_hardware_run`: Main method used to run the hardware
 
-    Optional methods to implement
-    - `stop_hardware`: The default implementation is `self.stop_hardware_event.set()`.
-      Either make `run_hardware` work with that, or implement a new stop method.
+    Optional methods to override:
+    - `_hardware_stop`: Use to stop the hardware
+    - `_hardware_reset`: Use to reset the hardware/python object to a startable state
+    - `_hardware_pause`: Use to pause the data flow from/to the device
+    - `_hardware_resume`: Use to resume data flow after a pause
+
+    See the documentation of these for more information.
+
     """
     _trigger_timeout = 1
     _q_timeout = 1
@@ -40,23 +45,34 @@ class Device:
         self.__process = multiprocessing.Process()
 
     def start(self):
+        # TODO: Documentation
         self.__process = multiprocessing.Process(target=self.__process_target)
         self.__process.start()
 
     def stop(self):
+        # TODO: Documentation
         self.__process_stop_event.set()
         self.__process.join()
         self.__reset()
 
     def pause(self):
+        # TODO: Documentation
         self._hardware_pause()
 
     def resume(self):
+        # TODO: Documentation
         self._hardware_resume()
 
     def _hardware_run(self):
         '''
-        This is the primary method in which data processing should be implemented.
+        This is the primary method in which hardware interfacing should be implemented.
+        There are two Qs, two required events, and two default controll events.
+            `_hardware_input_Q`: The Q where read input data should go
+            `_hardware_output_Q`: The Q where the output data to write is stored
+            `input_active`: The event which toggles if data should be placed in the input Q
+            `output_active`; The event whoch toggles if data should be read from the output Q
+            `_hardware_pause_event`: Toggles the pause state, see `_hardware_pause` and `_hardware_resume`
+            `_hardware_stop_event`: Tells the hardware thread to stop, see `_hardware_stop` and `_hardware_reset`
         '''
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
 
@@ -64,7 +80,8 @@ class Device:
         '''
         This is the primary method used for stopping the hardware.
         It is reccomended to do this using Events inside the _hardware_run method.
-        The default implementation is
+
+        Default implementation:
             self._hardware_pause_event.set()
             self._hardware_stop_event.set()
         '''
@@ -75,6 +92,11 @@ class Device:
         '''
         This method works in combination with `_hardware_stop` to put the hardware back to a state
         where it can be started again.
+
+        Default implementation:
+            self._hardware_pause_event.clear()
+            self._hardware_stop_event.clear()
+
         '''
         self._hardware_pause_event.clear()
         self._hardware_stop_event.clear()
@@ -85,12 +107,18 @@ class Device:
         changes in the intra-process setup, e.g. triggers or queues, but can be used to pause the data
         flow while waiting for something else.
         Prefferably, paused hardware should not actually do any reads or writes at all.
+
+        Default implementation:
+            self._hardware_pause_event.set()
         '''
         self._hardware_pause_event.set()
 
     def _hardware_resume(self):
         '''
         This method works in combination with `_hardware_pause` to resume operation after a pause.
+
+        Default implementation:
+            self._hardware_pause_event.clear()
         '''
         self._hardware_pause_event.clear()
 
@@ -118,6 +146,7 @@ class Device:
         return self._hardware_output_Q
 
     def register_trigger(self, trigger):
+        # TODO: Documentation
         if self.__process.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new triggers while the device is running. Stop the device and perform all setup before starting.')
@@ -125,6 +154,7 @@ class Device:
             self.__triggers.append(trigger)
 
     def remove_trigger(self, trigger):
+        # TODO: Documentation
         if self.__process.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
