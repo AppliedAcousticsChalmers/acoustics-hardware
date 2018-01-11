@@ -2,8 +2,10 @@ import queue
 import threading
 import numpy as np
 import logging
+from . import core
 
 import nidaqmx
+import nidaqmx.stream_readers
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,130 @@ def getDevices(name=None):
         return name
 
 
-class NIDevice (threading.Thread):
+class NIDevice(core.Device):
+    # TODO: Implement output devices. Caveat: We would need an output device to test the implementation...
+    def __init__(self, name='', fs=None, framesize=10000, dtype='float64'):
+        core.Device.__init__(self)
+        self.name = getDevices(name)
+        if fs is None:
+            self.fs = nidaqmx.system.System.local().devices[self.name].ai_max_single_chan_rate
+        else:
+            self.fs = fs
+        self.framesize = framesize  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
+        self.dtype = dtype
+        self.inputs = []
+
+    @property
+    def max_inputchannels(self):
+        return len(nidaqmx.system.System.local().devices[self.name].ai_physical_chans)
+
+    @property
+    def max_outputchannels(self):
+        return len(nidaqmx.system.System.local().devices[self.name].ao_physical_chans)
+
+    @property
+    def input_range(self):
+        '''
+        This is only an approximate value, do NOT use for calibrating unscaled readings
+        '''
+        return nidaqmx.system.System.local().devices[self.name].ai_voltage_rngs
+
+    def bit_depth(self, channel=None):
+        # TODO: This can only be called from the device process, otherwise the task is not available
+        if channel is None:
+            # TODO: What would be the expected behavior if the channels have different depths??
+            ch_idx = 0
+        else:
+            ch_idx = self.inputs.index(channel)
+        return self._task.ai_channels[ch_idx].ai_resolution
+
+    def word_length(self, channel=None):
+        # TODO: This can only be called from the device process, otherwise the task is not available
+        if channel is None:
+            return max([ch.ai_raw_samp_size for ch in self._task.ai_channels])
+        else:
+            ch_idx = self.inputs.index(channel)
+            return self._task.ai_channels[ch_idx].ai_raw_samp_size
+
+    def scaling_coeffs(self, channels=None):
+        '''
+        Returns the polynomial coefficients required to calculate
+        input voltage from unscaled integers
+        '''
+        # TODO: This can only be called from the device process, otherwise the task is not available
+        if channels is None:
+            channels = self.inputs
+        try:
+            ch_idx = [self.inputs.index(ch) for ch in channels]
+        except TypeError:
+            ch_idx = self.inputs.index(channels)
+            return self._task.ai_channels[ch_idx].ai_dev_scaling_coeff
+        else:
+            return [self._task.ai_channels[idx].ai_dev_scaling_coeff for idx in ch_idx]
+
+    def add_input(self, idx):
+        # TODO: Maybe some kind af assertion that the idx is OK?
+        if idx in self.inputs:
+            # TODO: Raise a warning?
+            return
+        self.inputs.append(idx)
+
+    def _hardware_setup(self):
+        self._task = nidaqmx.Task()
+        for ch in self.inputs:
+            self._task.ai_channels.add_ai_voltage_chan(self.name + '/ai{}'.format(ch))
+        if len(self.inputs) > 0:
+            self._task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
+                    sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+
+        # TODO: Setter instead?
+        if self.dtype.lower() == 'unscaled' or self.dtype.lower() == 'int':
+            wl = self.word_length()
+            self.dtype = 'int{}'.format(int(wl))
+        if len(self.inputs) > 0:
+            self._task.register_every_n_samples_acquired_into_buffer_event(self.framesize, self._create_input_callback())
+
+    def _hardware_run(self):
+        self._task.start()
+        self._hardware_stop_event.wait()
+        # TODO: How reliable is this? There have been some errors while stopping from here, but nothing that broke
+        # Is it better to stop the device from within the callback?
+        # It would be more expensive to check the stop event inside the callback for each frame
+        self._task.stop()
+        self._task.wait_until_done(timeout=10)
+        self._task.close()
+
+    def _create_input_callback(self):
+        if self.dtype == 'int16':
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self._task.in_stream)
+            databuffer = np.empty((len(self.inputs), self.framesize), dtype='int16')
+            read_function = reader.read_int16
+        elif self.dtype == 'int32':
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self._task.in_stream)
+            databuffer = np.empty((len(self.inputs), self.framesize), dtype='int32')
+            read_function = reader.read_int32
+        elif self.dtype == 'uint16':
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self._task.in_stream)
+            databuffer = np.empty((len(self.inputs), self.framesize), dtype='uint16')
+            read_function = reader.read_uint16
+        elif self.dtype == 'uint32':
+            reader = nidaqmx.stream_readers.AnalogUnscaledReader(self._task.in_stream)
+            databuffer = np.empty((len(self.inputs), self.framesize), dtype='uint32')
+            read_function = reader.read_uint32
+        else:  # Read as scaled float64
+            reader = nidaqmx.stream_readers.AnalogMultiChannelReader(self._task.in_stream)
+            databuffer = np.empty((len(self.inputs), self.framesize), dtype='float64')
+            read_function = reader.read_many_sample
+
+        def input_callback(task_handle, every_n_samples_event_type,
+                           number_of_samples, callback_data):
+            sampsRead = read_function(databuffer, self.framesize)
+            self._hardware_input_Q.put(databuffer.copy())
+            return 0
+        return input_callback
+
+
+class NIDevice_old (threading.Thread):
     def __init__(self, device='', fs=None, blocksize=10000, dtype='float64'):
         threading.Thread.__init__(self)
         self.device = getDevices(device)

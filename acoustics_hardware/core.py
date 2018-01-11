@@ -51,7 +51,9 @@ class Device:
     def stop(self):
         # TODO: Documentation
         self.__process_stop_event.set()
-        self.__process.join()
+        # self.__process.join(timeout=10)
+        # TODO: We will not wait for the process now, since it will not finish if there are
+        # items left in the Q.
 
     def _hardware_run(self):
         '''
@@ -165,8 +167,9 @@ class Device:
         trigger_thread.join()
         self.__q_stop_event.set()
         q_thread.join()
-
         self.__reset()
+        # TODO: We will not finish the process if there are items still in the Q,
+        # the question is what we want to do about it?
 
     def __trigger_target(self):
         # TODO: Get buffer size depending on pre-trigger value
