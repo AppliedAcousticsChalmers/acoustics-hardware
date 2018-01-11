@@ -13,8 +13,6 @@ class Device:
     Optional methods to override:
     - `_hardware_stop`: Use to stop the hardware
     - `_hardware_reset`: Use to reset the hardware/python object to a startable state
-    - `_hardware_pause`: Use to pause the data flow from/to the device
-    - `_hardware_resume`: Use to resume data flow after a pause
 
     See the documentation of these for more information.
 
@@ -26,7 +24,6 @@ class Device:
         self.input_active = multiprocessing.Event()
         self.output_active = multiprocessing.Event()
         self._hardware_output_Q = multiprocessing.Queue()
-        self._hardware_pause_event = multiprocessing.Event()
 
         # self._hardware_input_Q = queue.Queue()
         # self._hardware_stop_event = threading.Event()
@@ -56,14 +53,6 @@ class Device:
         self.__process_stop_event.set()
         self.__process.join()
 
-    def pause(self):
-        # TODO: Documentation
-        self._hardware_pause()
-
-    def resume(self):
-        # TODO: Documentation
-        self._hardware_resume()
-
     def _hardware_run(self):
         '''
         This is the primary method in which hardware interfacing should be implemented.
@@ -72,7 +61,6 @@ class Device:
             `_hardware_output_Q`: The Q where the output data to write is stored
             `input_active`: The event which toggles if data should be placed in the input Q
             `output_active`; The event whoch toggles if data should be read from the output Q
-            `_hardware_pause_event`: Toggles the pause state, see `_hardware_pause` and `_hardware_resume`
             `_hardware_stop_event`: Tells the hardware thread to stop, see `_hardware_stop` and `_hardware_reset`
         '''
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
@@ -92,45 +80,16 @@ class Device:
         It is reccomended to do this using Events inside the _hardware_run method.
 
         Default implementation:
-            self._hardware_pause_event.set()
             self._hardware_stop_event.set()
         '''
-        self._hardware_pause_event.set()
         self._hardware_stop_event.set()
 
     def _hardware_reset(self):
         '''
-        This method works in combination with `_hardware_stop` to put the hardware back to a state
+        This method works in combination with `_hardware_setup` to put the hardware back to a state
         where it can be started again.
-
-        Default implementation:
-            self._hardware_pause_event.clear()
-            self._hardware_stop_event.clear()
-
         '''
-        self._hardware_pause_event.clear()
-        self._hardware_stop_event.clear()
-
-    def _hardware_pause(self):
-        '''
-        This is the primary method used for pausing the hardware. Pausing the hardware will not allow
-        changes in the intra-process setup, e.g. triggers or queues, but can be used to pause the data
-        flow while waiting for something else.
-        Prefferably, paused hardware should not actually do any reads or writes at all.
-
-        Default implementation:
-            self._hardware_pause_event.set()
-        '''
-        self._hardware_pause_event.set()
-
-    def _hardware_resume(self):
-        '''
-        This method works in combination with `_hardware_pause` to resume operation after a pause.
-
-        Default implementation:
-            self._hardware_pause_event.clear()
-        '''
-        self._hardware_pause_event.clear()
+        pass
 
     def get_new_Q(self):
         if self.__process.is_alive():
