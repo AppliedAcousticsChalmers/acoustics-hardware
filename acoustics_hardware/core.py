@@ -25,31 +25,36 @@ class Device:
     def __init__(self):
         self.input_active = multiprocessing.Event()
         self.output_active = multiprocessing.Event()
-
-        self._hardware_input_Q = queue.Queue()
         self._hardware_output_Q = multiprocessing.Queue()
         self._hardware_pause_event = multiprocessing.Event()
-        self._hardware_stop_event = threading.Event()
+
+        # self._hardware_input_Q = queue.Queue()
+        # self._hardware_stop_event = threading.Event()
+        # self.__triggered_q = queue.Queue()
+        # self.__trigger_stop_event = threading.Event()
+        # self.__q_stop_event = threading.Event()
+
+        # self._hardware_input_Q = multiprocessing.Queue()
+        # self._hardware_stop_event = multiprocessing.Event()
+        # self.__triggered_q = multiprocessing.Queue()
+        # self.__q_stop_event = multiprocessing.Event()
+        # self.__trigger_stop_event = multiprocessing.Event()
 
         self.__triggers = []
         self.__Qs = []
-        self.__triggered_q = queue.Queue()
 
         self.__process_stop_event = multiprocessing.Event()
-        self.__trigger_stop_event = threading.Event()
-        self.__q_stop_event = threading.Event()
         self.__process = multiprocessing.Process()
 
     def start(self):
         # TODO: Documentation
-        self.__process = multiprocessing.Process(target=self.__process_target)
+        self.__process = multiprocessing.Process(target=self._Device__process_target)
         self.__process.start()
 
     def stop(self):
         # TODO: Documentation
         self.__process_stop_event.set()
         self.__process.join()
-        self.__reset()
 
     def pause(self):
         # TODO: Documentation
@@ -71,6 +76,15 @@ class Device:
             `_hardware_stop_event`: Tells the hardware thread to stop, see `_hardware_stop` and `_hardware_reset`
         '''
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
+
+    def _hardware_setup(self):
+        '''
+        This is responsible for setting up the hardware.
+        Note that this will be run in a separate process,
+        so there must be no connections to the hardware
+        from the first process.
+        '''
+        pass
 
     def _hardware_stop(self):
         '''
@@ -162,11 +176,20 @@ class Device:
         self.__trigger_stop_event.clear()
         self.__q_stop_event.clear()
         self._hardware_reset()
+        self._hardware_stop_event.clear()
 
-    def __process_target(self):
+    def _Device__process_target(self):
+        # The explicit naming of this method is needed on windows for some stange reason.
+        # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
+        self._hardware_input_Q = queue.Queue()
+        self._hardware_stop_event = threading.Event()
+        self.__triggered_q = queue.Queue()
+        self.__trigger_stop_event = threading.Event()
+        self.__q_stop_event = threading.Event()
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
+        self._hardware_setup()
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
         q_thread = threading.Thread(target=self.__q_target)
@@ -183,6 +206,8 @@ class Device:
         trigger_thread.join()
         self.__q_stop_event.set()
         q_thread.join()
+
+        self.__reset()
 
     def __trigger_target(self):
         # TODO: Get buffer size depending on pre-trigger value
