@@ -106,6 +106,10 @@ class NIDevice(core.Device):
         if len(self.inputs) > 0:
             self._task.register_every_n_samples_acquired_into_buffer_event(self.framesize, self._create_input_callback())
 
+    def _hardware_reset(self):
+        del self._task
+        nidaqmx.system.Device(self.name).reset_device()
+
     def _hardware_run(self):
         self._task.start()
         self._hardware_stop_event.wait()
