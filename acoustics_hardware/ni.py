@@ -29,7 +29,7 @@ class NIDevice(core.Device):
         core.Device.__init__(self)
         self.name = getDevices(name)
         if fs is None:
-            self.fs = nidaqmx.system.System.local().devices[self.name].ai_max_single_chan_rate
+            self.fs = nidaqmx.system.Device(self.name).ai_max_single_chan_rate
         else:
             self.fs = fs
         self.framesize = framesize  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
@@ -38,18 +38,18 @@ class NIDevice(core.Device):
 
     @property
     def max_inputchannels(self):
-        return len(nidaqmx.system.System.local().devices[self.name].ai_physical_chans)
+        return len(nidaqmx.system.Device(self.name).ai_physical_chans)
 
     @property
     def max_outputchannels(self):
-        return len(nidaqmx.system.System.local().devices[self.name].ao_physical_chans)
+        return len(nidaqmx.system.Device(self.name).ao_physical_chans)
 
     @property
     def input_range(self):
         '''
         This is only an approximate value, do NOT use for calibrating unscaled readings
         '''
-        return nidaqmx.system.System.local().devices[self.name].ai_voltage_rngs
+        return nidaqmx.system.Device(self.name).ai_voltage_rngs
 
     def bit_depth(self, channel=None):
         # TODO: This can only be called from the device process, otherwise the task is not available
