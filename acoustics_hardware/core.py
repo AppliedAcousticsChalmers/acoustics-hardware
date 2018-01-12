@@ -93,6 +93,23 @@ class Device:
         '''
         pass
 
+    def flush(self):
+        '''
+        Used to flush all Qs so that processes can terminate.
+        THIS WILL DELETE DATA which is still in the Qs
+        '''
+        for Q in self.__Qs:
+            while True:
+                try:
+                    Q.get(timeout=0.1)
+                except queue.Empty:
+                    break
+        while True:
+            try:
+                self.output_Q.get(timeout=0.1)
+            except queue.Empty:
+                break
+
     def get_new_Q(self):
         if self.__process.is_alive():
             # TODO: Custom warning class
