@@ -130,8 +130,6 @@ class HDFWriter:
         self.head[self.head.size + axis + 1:] = 0
         # self.head = head
 
-
-
     def _old_step(self, order=0):
         '''
         Moves the head to start a new measurement section
