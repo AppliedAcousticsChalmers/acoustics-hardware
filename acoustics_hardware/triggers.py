@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class RMSTrigger(core.Trigger):
     def __init__(self, *, level, channel, fs, action=None, region='Above', **kwargs):
-        Trigger.__init__(self, action=action)
+        core.Trigger.__init__(self, action=action)
         self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
         self.region = region
         self.trigger_level = level
@@ -59,7 +59,7 @@ class RMSTrigger(core.Trigger):
 
 class PeakTrigger(core.Trigger):
     def __init__(self, *, level, channel, action, region='Above'):
-        Trigger.__init__(self, action=action)
+        core.Trigger.__init__(self, action=action)
         # self.action = action
         self.region = region
         self.trigger_level = level

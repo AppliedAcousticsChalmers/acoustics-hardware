@@ -248,7 +248,7 @@ class Device:
 class Trigger:
     # TODO: Documentation
     def __init__(self, action=None, false_action=None):
-        self.active = threading.Event()
+        self.active = multiprocessing.Event()
         self.active.set()
 
         self.actions = []
