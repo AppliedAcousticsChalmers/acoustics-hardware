@@ -25,8 +25,10 @@ def get_devices(name=None):
 
 class NIDevice(core.Device):
     # TODO: Implement output devices. Caveat: We would need an output device to test the implementation...
-    def __init__(self, name='', fs=None, framesize=10000, dtype='float64'):
+    def __init__(self, name=None, fs=None, framesize=10000, dtype='float64'):
         core.Device.__init__(self)
+        if name is None:
+            name = get_devices()[0]
         self.name = get_devices(name)
         if fs is None:
             self.fs = nidaqmx.system.Device(self.name).ai_max_single_chan_rate
