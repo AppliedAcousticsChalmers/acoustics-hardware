@@ -91,7 +91,11 @@ class NIDevice(core.Device):
             return
         self.inputs.append(idx)
 
-    def _hardware_setup(self):
+    def _hardware_reset(self):
+        del self._task
+        nidaqmx.system.Device(self.name).reset_device()
+
+    def _hardware_run(self):
         self._task = nidaqmx.Task()
         for ch in self.inputs:
             self._task.ai_channels.add_ai_voltage_chan(self.name + '/ai{}'.format(ch))
@@ -106,11 +110,6 @@ class NIDevice(core.Device):
         if len(self.inputs) > 0:
             self._task.register_every_n_samples_acquired_into_buffer_event(self.framesize, self._create_input_callback())
 
-    def _hardware_reset(self):
-        del self._task
-        nidaqmx.system.Device(self.name).reset_device()
-
-    def _hardware_run(self):
         self._task.start()
         self._hardware_stop_event.wait()
         # TODO: How reliable is this? There have been some errors while stopping from here, but nothing that broke

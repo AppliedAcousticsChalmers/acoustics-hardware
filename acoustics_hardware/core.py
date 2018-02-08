@@ -72,15 +72,6 @@ class Device:
         '''
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
 
-    def _hardware_setup(self):
-        '''
-        This is responsible for setting up the hardware.
-        Note that this will be run in a separate process,
-        so there must be no connections to the hardware
-        from the first process.
-        '''
-        pass
-
     def _hardware_stop(self):
         '''
         This is the primary method used for stopping the hardware.
@@ -172,7 +163,6 @@ class Device:
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
-        self._hardware_setup()
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
         q_thread = threading.Thread(target=self.__q_target)

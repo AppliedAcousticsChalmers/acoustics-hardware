@@ -5,7 +5,7 @@ import schunk
 from . import core
 
 
-def getDevices(name=None):
+def get_devices(name=None):
     from serial.tools.list_ports import comports
     devs = comports()
 
@@ -33,7 +33,7 @@ def getDevices(name=None):
 class SerialDevice(core.Device):
     def __init__(self, name):
         core.Device.__init__(self)
-        self.name = getDevices(name)
+        self.name = get_devices(name)
         self.sweeps = 0  # 0 gives steady signal, positive number gives that many sweeps, -1 gives infinite sweeps
         self.shape = 'sine'
         self.frequency = 1e3
@@ -59,11 +59,6 @@ class SerialDevice(core.Device):
     def _off(self):
         self._write('apply:DC DEF, DEF, 0')
 
-    def _hardware_setup(self):
-        self.ser = Serial(port=self.name, timeout=1, dsrdtr=True)
-        self._write('system:remote')
-        self._off()
-
     def _hardware_reset(self):
         self.ser.close()
 
@@ -76,6 +71,10 @@ class SerialDevice(core.Device):
         )
 
     def _hardware_run(self):
+        self.ser = Serial(port=self.name, timeout=1, dsrdtr=True)
+        self._write('system:remote')
+        self._off()
+
         active = False
         if self.sweeps != 0:
             self._sweep_setup()
@@ -139,7 +138,7 @@ class SerialDevice(core.Device):
 class SerialInstrument:  # (Thread):
     def __init__(self, device=''):
         # Thread.__init__(self)
-        self.device = getDevices(device)
+        self.device = get_devices(device)
         self.ser = Serial(port=self.device, timeout=1, dsrdtr=True)
         self._write('system:remote')
         self.amplitude = 1
