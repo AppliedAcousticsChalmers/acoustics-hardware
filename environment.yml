@@ -3,6 +3,7 @@ dependencies:
   - numpy
   - scipy
   - matplotlib
+  - snakeviz
   - jupyter
   - pip
   - pip:
