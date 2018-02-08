@@ -91,10 +91,6 @@ class NIDevice(core.Device):
             return
         self.inputs.append(idx)
 
-    def _hardware_reset(self):
-        del self._task
-        nidaqmx.system.Device(self.name).reset_device()
-
     def _hardware_run(self):
         self._task = nidaqmx.Task()
         for ch in self.inputs:
@@ -118,6 +114,8 @@ class NIDevice(core.Device):
         self._task.stop()
         self._task.wait_until_done(timeout=10)
         self._task.close()
+        del self._task
+        nidaqmx.system.Device(self.name).reset_device()
 
     def _create_input_callback(self):
         if self.dtype == 'int16':

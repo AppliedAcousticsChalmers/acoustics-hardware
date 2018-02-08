@@ -59,9 +59,6 @@ class SerialDevice(core.Device):
     def _off(self):
         self._write('apply:DC DEF, DEF, 0')
 
-    def _hardware_reset(self):
-        self.ser.close()
-
     def _sweep_setup(self):
         self._write(
             'frequency:start {}'.format(self.frequency_start),
@@ -133,6 +130,7 @@ class SerialDevice(core.Device):
                                 'volt {}'.format(self.amplitude),
                                 'sweep:state on')
                             active = True
+        self.ser.close()
 
 
 class SerialInstrument:  # (Thread):
