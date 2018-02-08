@@ -2,6 +2,8 @@
 from serial import Serial
 import schunk
 
+from . import core
+
 
 def getDevices(name=None):
     from serial.tools.list_ports import comports
@@ -26,6 +28,112 @@ def getDevices(name=None):
     # This would require us to open a connection for all devs and query for a identifier
     # That's probably dengerous since we might send queries in the wrong format
     # to devices that might respond and do something unspecified
+
+
+class SerialDevice(core.Device):
+    def __init__(self, name):
+        core.Device.__init__(self)
+        self.name = getDevices(name)
+        self.sweeps = 0  # 0 gives steady signal, positive number gives that many sweeps, -1 gives infinite sweeps
+        self.shape = 'sine'
+        self.frequency = 1e3
+        self.frequency_start = 1e3
+        self.frequency_stop = 4e3
+        self.sweep_time = 1
+        self.sweep_spacing = 'log'
+        self.amplitude = 1
+
+    sweeps = core.InterProcessAttr('sweeps')
+    shape = core.InterProcessAttr('shape')
+    frequency = core.InterProcessAttr('frequency')
+    frequency_start = core.InterProcessAttr('frequency_start')
+    frequency_stop = core.InterProcessAttr('frequency_stop')
+    sweep_time = core.InterProcessAttr('sweep_time')
+    sweep_spacing = core.InterProcessAttr('sweep_spacing')
+    amplitude = core.InterProcessAttr('amplitude')
+
+    def _write(self, *commands):
+        for command in commands:
+            self.ser.write(bytes(command + '\n', 'UTF-8'))
+
+    def _off(self):
+        self._write('apply:DC DEF, DEF, 0')
+
+    def _hardware_setup(self):
+        self.ser = Serial(port=self.name, timeout=1, dsrdtr=True)
+        self._write('system:remote')
+        self._off()
+
+    def _hardware_reset(self):
+        self.ser.close()
+
+    def _sweep_setup(self):
+        self._write(
+            'frequency:start {}'.format(self.frequency_start),
+            'frequency:stop {}'.format(self.frequency_stop),
+            'sweep:time {}'.format(self.sweep_time),
+            'sweep:spacing {}'.format(self.sweep_spacing)
+        )
+
+    def _hardware_run(self):
+        active = False
+        if self.sweeps != 0:
+            self._sweep_setup()
+        while not self._hardware_stop_event.is_set():
+            changes = self._update_attrs()
+            if self.sweeps == 0:
+                # We are using continious output, check if it should be toggled or not
+                if active:
+                    # Output currently active, check if we should deactivate
+                    if not self.output_active.is_set():
+                        self._off()
+                        active = False
+                        # TODO: Will we need time.sleep here? We cannot wait for event to clear,
+                        # so the current implementation will only check the event and proceed imediately
+                    elif changes:
+                        self._write('apply:{} {}, {}'.format(self.shape[:3], self.frequency, self.amplitude))
+                else:
+                    # Output currently inactive, wait for activation signal
+                    if self.output_active.wait(self._hardware_timeout):
+                        # TODO: Is this the correct sequencing of the commands?
+                        self._write('apply:{} {}, {}'.format(self.shape[:3], self.frequency, self.amplitude))
+                        active = True
+
+            else:  # Sweeping mode
+                if changes:
+                    self._sweep_setup()
+                if self.sweeps > 0:
+                    # Finite number of sweeps
+                    if self.output_active.wait(timeout=self._hardware_timeout):
+                        # Do the required sweeps
+                        self._write(
+                            'func:shape {}'.format(self.shape[:3]),
+                            'trigger:source bus',
+                            'sweep:state on',
+                            'volt {}'.format(self.amplitude))
+                        for idx in range(self.sweeps):
+                            self._write('*TRG')
+                        self._write('*WAI')
+                        self._off()
+                        self.output_active.clear()
+                else:
+                    # Infinite number of sweeps
+                    if active:
+                        # Output currently active, check if we should deactivate
+                        if not self.output_active.is_set():
+                            self._off()
+                            active = False
+                            # TODO: Will we need time.sleep here? We cannot wait for event to clear,
+                            # so the current implementation will only check the event and proceed imediately
+                    else:
+                        # Output currently inactive, wait for activation signal
+                        if self.output_active.wait(self._hardware_timeout):
+                            # TODO: Is this the correct sequencing of the commands?
+                            self._write(
+                                'func:shape {}'.format(self.shape[:3]),
+                                'volt {}'.format(self.amplitude),
+                                'sweep:state on')
+                            active = True
 
 
 class SerialInstrument:  # (Thread):

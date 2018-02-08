@@ -10,7 +10,7 @@ import nidaqmx.stream_readers
 logger = logging.getLogger(__name__)
 
 
-def getDevices(name=None):
+def get_devices(name=None):
     system = nidaqmx.system.System.local()
     name_list = [dev.name for dev in system.devices]
     if name is None:
@@ -27,7 +27,7 @@ class NIDevice(core.Device):
     # TODO: Implement output devices. Caveat: We would need an output device to test the implementation...
     def __init__(self, name='', fs=None, framesize=10000, dtype='float64'):
         core.Device.__init__(self)
-        self.name = getDevices(name)
+        self.name = get_devices(name)
         if fs is None:
             self.fs = nidaqmx.system.Device(self.name).ai_max_single_chan_rate
         else:
