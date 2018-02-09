@@ -38,12 +38,17 @@ class NIDevice(core.Device):
         self.dtype = dtype
         self.inputs = []
 
+    def add_input(self, idx):
+        # TODO: Maybe some kind af assertion that the idx is OK?
+        if idx not in self.inputs and idx < self.max_inputs:
+            self.inputs.append(idx)
+
     @property
-    def max_inputchannels(self):
+    def max_inputs(self):
         return len(nidaqmx.system.Device(self.name).ai_physical_chans)
 
     @property
-    def max_outputchannels(self):
+    def max_outputs(self):
         return len(nidaqmx.system.Device(self.name).ao_physical_chans)
 
     @property
@@ -85,13 +90,6 @@ class NIDevice(core.Device):
             return self._task.ai_channels[ch_idx].ai_dev_scaling_coeff
         else:
             return [self._task.ai_channels[idx].ai_dev_scaling_coeff for idx in ch_idx]
-
-    def add_input(self, idx):
-        # TODO: Maybe some kind af assertion that the idx is OK?
-        if idx in self.inputs:
-            # TODO: Raise a warning?
-            return
-        self.inputs.append(idx)
 
     def _hardware_run(self):
         self._task = nidaqmx.Task()
