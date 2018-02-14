@@ -1,6 +1,6 @@
 import queue
 import threading
-import multiprocessing
+# import multiprocessing
 import collections
 
 
@@ -24,33 +24,31 @@ class Device:
     _attr_response_timeout = 1
 
     def __init__(self):
-        self.input_active = multiprocessing.Event()
-        self.output_active = multiprocessing.Event()
-        self._hardware_output_Q = multiprocessing.Queue()
+        # self.input_active = multiprocessing.Event()
+        self.input_active = threading.Event()
+        # self.output_active = multiprocessing.Event()
+        self.output_active = threading.Event()
+        # self._hardware_output_Q = multiprocessing.Queue()
+        self._hardware_output_Q = queue.Queue()
 
-        # self._hardware_input_Q = queue.Queue()
-        # self._hardware_stop_event = threading.Event()
-        # self.__triggered_q = queue.Queue()
-        # self.__trigger_stop_event = threading.Event()
-        # self.__q_stop_event = threading.Event()
-
-        # self._hardware_input_Q = multiprocessing.Queue()
-        # self._hardware_stop_event = multiprocessing.Event()
-        # self.__triggered_q = multiprocessing.Queue()
-        # self.__q_stop_event = multiprocessing.Event()
-        # self.__trigger_stop_event = multiprocessing.Event()
-        self.__attr_request_Q = multiprocessing.Queue()
-        self.__attr_response_Q = multiprocessing.Queue()
+        # self.__attr_request_Q = multiprocessing.Queue()
+        self.__attr_request_Q = queue.Queue()
+        # self.__attr_response_Q = multiprocessing.Queue()
+        self.__attr_response_Q = queue.Queue()
 
         self.__triggers = []
         self.__Qs = []
 
-        self.__process_stop_event = multiprocessing.Event()
-        self.__process = multiprocessing.Process()
+        # self.__process_stop_event = multiprocessing.Event()
+        self.__process_stop_event = threading.Event()
+        # self.__process = multiprocessing.Process()
+        self.__process = threading.Thread()
 
     def start(self):
         # TODO: Documentation
-        self.__process = multiprocessing.Process(target=self._Device__process_target)
+        # self.__process = multiprocessing.Process(target=self._Device__process_target)
+        self.__process = threading.Thread(target=self._Device__process_target)
+
         self.__process.start()
 
     def stop(self):
@@ -111,7 +109,8 @@ class Device:
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
-            Q = multiprocessing.Queue()
+            # Q = multiprocessing.Queue()
+            Q = queue.Queue()
             self.__Qs.append(Q)
             return Q
 
@@ -262,7 +261,8 @@ class InterProcessAttr:
         self.attr = '_' + attr
 
     def __get__(self, obj, objtype):
-        if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
+        # if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
+        if obj._Device__process.is_alive():
             # The process is running, and we are trying to access it from a another process
             obj._Device__attr_request_Q.put(self.attr)  # Create a request for the attribute
             val = obj._Device__attr_response_Q.get(timeout=obj._attr_response_timeout)  # Wait for the response
@@ -273,7 +273,8 @@ class InterProcessAttr:
 
     def __set__(self, obj, val):
         setattr(obj, self.attr, val)
-        if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
+        # if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
+        if obj._Device__process.is_alive():
             # The device subprocess has started, and we are setting it from another process
             obj._Device__attr_request_Q.put((self.attr, val))
 
@@ -281,7 +282,8 @@ class InterProcessAttr:
 class Trigger:
     # TODO: Documentation
     def __init__(self, action=None, false_action=None):
-        self.active = multiprocessing.Event()
+        # self.active = multiprocessing.Event()
+        self.active = threading.Event()
         self.active.set()
 
         self.actions = []
