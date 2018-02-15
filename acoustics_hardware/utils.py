@@ -4,6 +4,13 @@ import queue
 import threading
 
 
+def flush_Q(q):
+    while True:
+        try:
+            q.get(timeout=0.1)
+        except queue.Empty:
+            break
+
 def calibrate(device_handler, channel, frequency=1e3, rms=1):
     # Remove the existing output Qs and replace with our own
     old_Qs = device_handler.queue_handler.queues

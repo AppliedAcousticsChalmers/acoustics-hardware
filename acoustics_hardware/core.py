@@ -3,6 +3,7 @@ import threading
 # import multiprocessing
 import collections
 import numpy as np
+from . import utils
 
 
 class Device:
@@ -93,17 +94,8 @@ class Device:
         Used to flush all Qs so that processes can terminate.
         THIS WILL DELETE DATA which is still in the Qs
         '''
-        for Q in self.__Qs:
-            while True:
-                try:
-                    Q.get(timeout=0.1)
-                except queue.Empty:
-                    break
-        while True:
-            try:
-                self.output_Q.get(timeout=0.1)
-            except queue.Empty:
-                break
+        for q in self.__Qs:
+            utils.flush_Q(q)
 
     @property
     def input_Q(self):
