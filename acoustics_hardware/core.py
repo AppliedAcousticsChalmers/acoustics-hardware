@@ -357,6 +357,10 @@ class Generator:
         pass
 
 
+class GeneratorStop(Exception):
+        pass
+
+
 class Printer(Device):
     def _hardware_run(self):
         # print(dir(self))

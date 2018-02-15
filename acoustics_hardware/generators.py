@@ -16,7 +16,10 @@ class QGenerator(core.Generator):
             gen_frame.append(self.buffer[..., :samples_left])
             samples_left -= gen_frame[-1].shape[-1]
         while samples_left > 0:
-            frame = self.Q.get(timeout=self._device._generator_timeout)
+            try:
+                frame = self.Q.get(timeout=self._device._generator_timeout)
+            except queue.Empty:
+                raise core.GeneratorStop('Input Q is empty')
             gen_frame.append(frame[..., :samples_left])
             samples_left -= frame.shape[-1]
         if samples_left < 0:
