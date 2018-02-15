@@ -2,6 +2,7 @@ import queue
 import threading
 # import multiprocessing
 import collections
+import numpy as np
 
 
 class Device:
@@ -17,6 +18,7 @@ class Device:
     See the documentation of these for more information.
 
     """
+    _generator_timeout = 1
     _trigger_timeout = 1
     _q_timeout = 1
     _hardware_timeout = 1
@@ -28,14 +30,13 @@ class Device:
         self.input_active = threading.Event()
         # self.output_active = multiprocessing.Event()
         self.output_active = threading.Event()
-        # self._hardware_output_Q = multiprocessing.Queue()
-        self._hardware_output_Q = queue.Queue()
 
         # self.__attr_request_Q = multiprocessing.Queue()
         self.__attr_request_Q = queue.Queue()
         # self.__attr_response_Q = multiprocessing.Queue()
         self.__attr_response_Q = queue.Queue()
 
+        self.__generators = []
         self.__triggers = []
         self.__Qs = []
 
@@ -133,7 +134,7 @@ class Device:
         # TODO: Documentation
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
-            raise UserWarning('It is not possible to register new triggers while the device is running. Stop the device and perform all setup before starting.')
+            raise UserWarning('It is not possible to add new triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.append(trigger)
             trigger._device = self
@@ -147,6 +148,20 @@ class Device:
             self.__triggers.remove(trigger)
             trigger._device = None
 
+    def add_generator(self, generator):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__generators.append(generator)
+            generator._device = self
+
+    def remove_generator(self, generator):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__generators.remove(generator)
+            generator._device = None
+
     def __reset(self):
         self.__main_stop_event.clear()
         self.__trigger_stop_event.clear()
@@ -155,28 +170,36 @@ class Device:
         self._hardware_stop_event.clear()
         for trigger in self.__triggers:
             trigger.reset()
+        for generator in self.__generators:
+            generator.reset()
 
     def _Device__main_target(self):
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
+        self._hardware_output_Q = queue.Queue()
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
+        self.__generator_stop_event = threading.Event()
         self.__trigger_stop_event = threading.Event()
         self.__q_stop_event = threading.Event()
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
+        generator_thread = threading.Thread(targe=self.__generator_target)
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
         q_thread = threading.Thread(target=self.__q_target)
 
+        generator_thread.start()
         hardware_thread.start()
         trigger_thread.start()
         q_thread.start()
 
         self.__main_stop_event.wait()
 
+        self.__generator_stop_event.set()
+        generator_thread.join()
         self._hardware_stop()
         hardware_thread.join()
         self.__trigger_stop_event.set()
@@ -242,6 +265,11 @@ class Device:
                 break
             for Q in self.__Qs:
                 Q.put(this_frame)
+
+    def __generator_target(self):
+        while not self.__generator_stop_event.is_set():
+            if self.output_active.wait(timeout=self._generator_timeout):
+                self._hardware_output_Q.put(np.concatenate([generator() for generator in self.__generators]))
 
     def _update_attrs(self):
         changed = False
@@ -321,6 +349,17 @@ class Trigger:
 
     def test(self, frame):
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
+
+    def reset(self):
+        pass
+
+
+class Generator:
+    def __init__(self):
+        self._device = None
+
+    def __call__(self):
+        raise NotImplementedError('Generators must be callable. Implement `__call__` in {}'.format(self.__class__.__name__))
 
     def reset(self):
         pass
