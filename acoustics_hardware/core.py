@@ -104,7 +104,8 @@ class Device:
             except queue.Empty:
                 break
 
-    def get_new_Q(self):
+    @property
+    def input_Q(self):
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
@@ -128,13 +129,14 @@ class Device:
         # This only exists to have consistent naming conventions (_hardware_input_Q, _hardware_output_Q) for subclassing
         return self._hardware_output_Q
 
-    def register_trigger(self, trigger):
+    def add_trigger(self, trigger):
         # TODO: Documentation
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.append(trigger)
+            trigger._device = self
 
     def remove_trigger(self, trigger):
         # TODO: Documentation
@@ -143,6 +145,7 @@ class Device:
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.remove(trigger)
+            trigger._device = None
 
     def __reset(self):
         self.__main_stop_event.clear()
@@ -150,6 +153,8 @@ class Device:
         self.__q_stop_event.clear()
         self._hardware_reset()
         self._hardware_stop_event.clear()
+        for trigger in self.__triggers:
+            trigger.reset()
 
     def _Device__main_target(self):
         # The explicit naming of this method is needed on windows for some stange reason.
@@ -299,6 +304,7 @@ class Trigger:
                 self.false_actions.extend(false_action)
             except TypeError:
                 self.false_actions.append(false_action)
+        self._device = None
 
     def __call__(self, frame):
         # We need to perform the test event if the triggering is disabled
@@ -315,6 +321,9 @@ class Trigger:
 
     def test(self, frame):
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
+
+    def reset(self):
+        pass
 
 
 class Printer(Device):
