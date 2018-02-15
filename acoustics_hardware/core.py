@@ -39,21 +39,21 @@ class Device:
         self.__triggers = []
         self.__Qs = []
 
-        # self.__process_stop_event = multiprocessing.Event()
-        self.__process_stop_event = threading.Event()
-        # self.__process = multiprocessing.Process()
-        self.__process = threading.Thread()
+        # self.__main_stop_event = multiprocessing.Event()
+        self.__main_stop_event = threading.Event()
+        # self.__main_thread = multiprocessing.Process()
+        self.__main_thread = threading.Thread()
 
     def start(self):
         # TODO: Documentation
-        # self.__process = multiprocessing.Process(target=self._Device__process_target)
-        self.__process = threading.Thread(target=self._Device__process_target)
+        # self.__main_thread = multiprocessing.Process(target=self._Device__main_target)
+        self.__main_thread = threading.Thread(target=self._Device__main_target)
 
-        self.__process.start()
+        self.__main_thread.start()
 
     def stop(self):
         # TODO: Documentation
-        self.__process_stop_event.set()
+        self.__main_stop_event.set()
         # self.__process.join(timeout=10)
         # TODO: We will not wait for the process now, since it will not finish if there are
         # items left in the Q.
@@ -105,7 +105,7 @@ class Device:
                 break
 
     def get_new_Q(self):
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
@@ -115,7 +115,7 @@ class Device:
             return Q
 
     def remove_Q(self, Q):
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
@@ -130,7 +130,7 @@ class Device:
 
     def register_trigger(self, trigger):
         # TODO: Documentation
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
@@ -138,20 +138,20 @@ class Device:
 
     def remove_trigger(self, trigger):
         # TODO: Documentation
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.remove(trigger)
 
     def __reset(self):
-        self.__process_stop_event.clear()
+        self.__main_stop_event.clear()
         self.__trigger_stop_event.clear()
         self.__q_stop_event.clear()
         self._hardware_reset()
         self._hardware_stop_event.clear()
 
-    def _Device__process_target(self):
+    def _Device__main_target(self):
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
@@ -170,7 +170,7 @@ class Device:
         trigger_thread.start()
         q_thread.start()
 
-        self.__process_stop_event.wait()
+        self.__main_stop_event.wait()
 
         self._hardware_stop()
         hardware_thread.join()
@@ -262,7 +262,7 @@ class InterProcessAttr:
 
     def __get__(self, obj, objtype):
         # if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
-        if obj._Device__process.is_alive():
+        if obj._Device__main_thread.is_alive():
             # The process is running, and we are trying to access it from a another process
             obj._Device__attr_request_Q.put(self.attr)  # Create a request for the attribute
             val = obj._Device__attr_response_Q.get(timeout=obj._attr_response_timeout)  # Wait for the response
@@ -274,7 +274,7 @@ class InterProcessAttr:
     def __set__(self, obj, val):
         setattr(obj, self.attr, val)
         # if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
-        if obj._Device__process.is_alive():
+        if obj._Device__main_thread.is_alive():
             # The device subprocess has started, and we are setting it from another process
             obj._Device__attr_request_Q.put((self.attr, val))
 
