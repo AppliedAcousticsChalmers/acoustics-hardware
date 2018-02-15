@@ -33,10 +33,10 @@ class QGenerator(core.Generator):
 
 
 class SignalGenerator(core.Generator):
-    def __init__(self):
+    def __init__(self, repetitions=np.inf):
         core.Generator.__init__(self)
         self.signal = None
-        self.repetitions = np.inf  # Default to continious output
+        self.repetitions = repetitions  # Default to continious output
         self.reset()
 
     def __call__(self):
@@ -70,3 +70,15 @@ class SignalGenerator(core.Generator):
         important properties, e.g. samplerate `fs`.
         """
         raise NotImplementedError('Required method `setup` not implemented in {}'.format(self.__class__.__name__))
+
+
+class SineGenerator(SignalGenerator):
+    def __init__(self, frequency=None, amplitude=1, **kwargs):
+        SignalGenerator.__init__(self, **kwargs)
+        self.frequency = frequency
+        self.amplitude = amplitude
+
+    def setup(self):
+        samps = round(self._device.fs / self.frequency)
+        self.frequency = self._device.fs / samps
+        self.signal = self.amplitude * np.sin(np.arange(samps) / samps * 2 * np.pi)
