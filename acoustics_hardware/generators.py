@@ -42,8 +42,6 @@ class SignalGenerator(core.Generator):
     def __call__(self):
         if self.repetitions_done >= self.repetitions:
             raise core.GeneratorStop('Finite number of repetitions reached')
-        if self.signal is None:
-            self.setup()
         samples_left = self._device.framesize
         gen_frame = []
         while samples_left > 0:

@@ -259,9 +259,14 @@ class Device:
                 Q.put(this_frame)
 
     def __generator_target(self):
+        for generator in self.__generators:
+            generator.setup()
         while not self.__generator_stop_event.is_set():
             if self.output_active.wait(timeout=self._generator_timeout):
-                self._hardware_output_Q.put(np.concatenate([generator() for generator in self.__generators]))
+                try:
+                    self._hardware_output_Q.put(np.concatenate([generator() for generator in self.__generators]))
+                except GeneratorStop:
+                    self.output_active.clear()
 
     def _update_attrs(self):
         changed = False
@@ -354,6 +359,9 @@ class Generator:
         raise NotImplementedError('Generators must be callable. Implement `__call__` in {}'.format(self.__class__.__name__))
 
     def reset(self):
+        pass
+
+    def setup(self):
         pass
 
 
