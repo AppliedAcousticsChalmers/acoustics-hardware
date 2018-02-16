@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.fft import rfft as fft, irfft as ifft
-from scipy.signal import waveforms
+from scipy.signal import waveforms, max_len_seq
 import queue
 from . import core, utils
 
@@ -72,6 +72,33 @@ class ArbitrarySignalGenerator(core.Generator):
         """
         if 'signal' in self.kwargs:
             self.signal = self.kwargs['signal']
+
+
+class SweepGenerator(ArbitrarySignalGenerator):
+    def __init__(self, start_frequency, stop_frequency, duration, method='logarithmic', bidirectional=False, **kwargs):
+        ArbitrarySignalGenerator.__init__(self, **kwargs)
+        self.start_frequency = start_frequency
+        self.stop_frequency = stop_frequency
+        self.duration = duration
+        self.method = method
+        self.bidirectional = bidirectional
+
+    def setup(self):
+        time_vector = np.arange(round(self.duration * self._device.fs)) / self._device.fs
+        self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
+        if self.bidirectional:
+            self.signal = np.concatenate([self.signal, self.signal[::-1]])
+            self.repetitions /= 2
+
+
+class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
+    def __init__(self, order, **kwargs):
+        ArbitrarySignalGenerator.__init__(self, **kwargs)
+        self.order = order
+
+    def setup(self):
+        self.sequence, state = max_len_seq(self.order)
+        self.signal = 1 - 2 * self.sequence
 
 
 class FunctionGenerator(core.Generator):
