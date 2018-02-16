@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.fft import rfft as fft, irfft as ifft
 import queue
 from . import core, utils
 
@@ -80,3 +81,106 @@ class SineGenerator(SignalGenerator):
         samps = round(self._device.fs / self.frequency)
         self.frequency = self._device.fs / samps
         self.signal = self.amplitude * np.sin(np.arange(samps) / samps * 2 * np.pi)
+
+
+class NoiseGenerator(core.Generator):
+    _color_slopes = {
+        'purple': -2,
+        'blue': -1,
+        'white': 0,
+        'pink': 1,
+        'brown': 2
+    }
+
+    def __init__(self, color='white', method='autoregressive', **kwargs):
+        core.Generator.__init__(self)
+        self.color = color
+        self.method = method
+        self.method_args = kwargs
+
+    def _fft_noise(self):
+        normal = np.random.normal(size=self._device.framesize)
+        shaped = ifft(self._spectral_coefficients * fft(normal))
+        # TODO: Normalization, variable amplitude, soft clipping?
+        return shaped
+
+    def _fft_setup(self):
+        bins = np.arange(self._device.framesize // 2 + 1)  # We are using single sided spectrum
+        bins[0] = 1  # Do not modify DC bin
+        self._spectral_coefficients = bins.astype('double')**(-self.power / 2)
+
+    def _fft_reset(self):
+        del self._spectral_coefficients
+
+    def _ar_noise(self):
+        normal = np.random.normal(size=self._device.framesize)
+        shaped = np.zeros(shape=self._device.framesize)
+        for idx in range(self._device.framesize):
+            shaped[idx] = normal[idx] - (self._ar_coefficients * self._ar_buffer).sum()
+            self._ar_buffer = np.roll(self._ar_buffer, 1)
+            self._ar_buffer[0] = shaped[idx]
+        return shaped
+
+    def _ar_setup(self):
+        order = self.method_args.get('order', 63)
+        self._ar_buffer = np.zeros(order - 1)
+        coefficients = np.zeros(order)
+        coefficients[0] = 1
+        for k in range(1, order):
+            coefficients[k] = (k - 1 - self.power / 2) * coefficients[k - 1] / k
+        self._ar_coefficients = coefficients[1:]
+
+    def _ar_reset(self):
+        del self._ar_buffer
+        del self._ar_coefficients
+
+    _call_methods = {
+        'fft': _fft_noise,
+        'autoregressive': _ar_noise
+    }
+
+    _setup_methods = {
+        'fft': _fft_setup,
+        'autoregressive': _ar_setup
+    }
+
+    _reset_methods = {
+        'fft': _fft_reset,
+        'autoregressive': _ar_reset
+    }
+
+    def __call__(self):
+        return self._call_methods[self.method](self)
+
+    def setup(self):
+        self._setup_methods[self.method](self)
+
+    def reset(self):
+        self._reset_methods[self.method](self)
+
+    @property
+    def color(self):
+        return self._color
+
+    @color.setter
+    def color(self, val):
+        try:
+            self.power = self._color_slopes[val.lower()]
+        except KeyError:
+            raise KeyError('Unknown noise color `{}`'.format(val))
+        except AttributeError:
+            self.power = val
+            self._color = 'custom'
+        else:
+            self._color = val.lower()
+
+    @property
+    def method(self):
+        return self._method
+
+    @method.setter
+    def method(self, val):
+        if val.lower() in self._call_methods:
+            self._method = val.lower()
+        else:
+            raise KeyError('Unknown generation method `{}`'.format(val))
