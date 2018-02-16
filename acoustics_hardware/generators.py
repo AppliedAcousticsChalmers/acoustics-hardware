@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.fft import rfft as fft, irfft as ifft
+from scipy.signal import waveforms
 import queue
 from . import core, utils
 
@@ -33,11 +34,11 @@ class QGenerator(core.Generator):
         utils.flush_Q(self.Q)
 
 
-class SignalGenerator(core.Generator):
-    def __init__(self, repetitions=np.inf):
+class ArbitrarySignalGenerator(core.Generator):
+    def __init__(self, repetitions=np.inf, **kwargs):
         core.Generator.__init__(self)
-        self.signal = None
         self.repetitions = repetitions  # Default to continious output
+        self.kwargs = kwargs
         self.reset()
 
     def __call__(self):
@@ -59,6 +60,7 @@ class SignalGenerator(core.Generator):
         return np.concatenate(gen_frame, axis=-1)
 
     def reset(self):
+        self.signal = None
         self.idx = 0
         self.repetitions_done = 0
 
@@ -68,19 +70,61 @@ class SignalGenerator(core.Generator):
         in `self.signal`. Access the underlying device as `self._device`, which has
         important properties, e.g. samplerate `fs`.
         """
-        raise NotImplementedError('Required method `setup` not implemented in {}'.format(self.__class__.__name__))
+        if 'signal' in self.kwargs:
+            self.signal = self.kwargs['signal']
 
 
-class SineGenerator(SignalGenerator):
-    def __init__(self, frequency=None, amplitude=1, **kwargs):
-        SignalGenerator.__init__(self, **kwargs)
+class FunctionGenerator(core.Generator):
+    _functions = {
+        'sin': waveforms.sin,
+        'saw': waveforms.sawtooth,
+        'squ': waveforms.square
+    }
+
+    def __init__(self, frequency, amplitude=1, repetitions=np.inf, shape='sine', phase_offset=0, **kwargs):
+        core.Generator.__init__(self)
+        self.repetitions = repetitions  # Default to continious output
+        self.kwargs = kwargs
         self.frequency = frequency
         self.amplitude = amplitude
+        self.shape = shape
+        self.phase_offset = phase_offset
+
+    def __call__(self):
+        if self.repetitions_done >= self.repetitions:
+            raise core.GeneratorStop('Finite number of repetitions reached')
+        frame = self._function(self._phase_array + self._phase, **self.kwargs)
+        self._phase += self._phase_per_frame
+        if self.repetitions_done >= self.repetitions:
+            surplus_reps = self.repetitions_done - self.repetitions
+            surplus_samps = round(surplus_reps * self._device.fs / self.frequency)
+            frame[-surplus_samps:] = 0
+        return self.amplitude * frame
 
     def setup(self):
-        samps = round(self._device.fs / self.frequency)
-        self.frequency = self._device.fs / samps
-        self.signal = self.amplitude * np.sin(np.arange(samps) / samps * 2 * np.pi)
+        self.reset()
+        taps = np.arange(self._device.framesize)
+        self._phase_array = 2 * np.pi * taps * self.frequency / self._device.fs
+        self._phase_per_frame = 2 * np.pi * self.frequency / self._device.fs * self._device.framesize
+
+    def reset(self):
+        self._phase = self.phase_offset
+
+    @property
+    def shape(self):
+        return self._shape
+
+    @shape.setter
+    def shape(self, val):
+        if val.lower()[:3] in self._functions:
+            self._shape = val.lower()
+            self._function = self._functions[val.lower()[:3]]
+        else:
+            raise KeyError('Unknown function shape `{}`'.format(val))
+
+    @property
+    def repetitions_done(self):
+        return self._phase / (2 * np.pi)
 
 
 class NoiseGenerator(core.Generator):
