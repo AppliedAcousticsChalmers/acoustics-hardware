@@ -58,8 +58,16 @@ class LevelDetector:
         # TODO: Enable custom mappings?
         # Squared input level is tracked in order for the RMS trigger to work properly.
         input_levels = block[self.channel]**2
-        output_levels, self.current_level = lfilter([self.time_constant], [1, self.time_constant - 1], input_levels, zi=self.current_level)
+        output_levels, self.current_level = lfilter([self._digital_constant], [1, self._digital_constant - 1], input_levels, zi=self.current_level)
         return output_levels**0.5
+
+    @property
+    def time_constant(self):
+        return -1 / (np.log(1 - self._digital_constant) * self.fs)
+
+    @time_constant.setter
+    def time_constant(self, val):
+        self._digital_constant = 1 - np.exp(-1 / (val * self.fs))
 
 
 class LevelDetectorAttackRelease:
