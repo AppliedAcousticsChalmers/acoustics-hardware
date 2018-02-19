@@ -370,12 +370,13 @@ class InterProcessAttr:
 
 class Trigger:
     # TODO: Documentation
-    def __init__(self, action=None, false_action=None):
+    def __init__(self, action=None, false_action=None, auto_deactivate=True):
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
         self.active.set()
 
         self.actions = []
+        self.auto_deactivate = auto_deactivate
         if action is not None:
             try:
                 self.actions.extend(action)
@@ -416,6 +417,16 @@ class Trigger:
         else:
             self.calibrations = np.ones(len(self._device.inputs))
 
+    @property
+    def auto_deactivate(self):
+        return self.active.clear in self.actions
+
+    @auto_deactivate.setter
+    def auto_deactivate(self, value):
+        if value and not self.auto_deactivate:
+            self.actions.insert(0, self.active.clear)
+        elif self.auto_deactivate and not value:
+            self.actions.remove(self.active.clear)
 
 
 class Generator:
