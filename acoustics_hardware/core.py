@@ -71,6 +71,13 @@ class Device:
             self.outputs.append(Channel(index, 'output', **kwargs))
 
     @property
+    def calibrations(self):
+        return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
+
+    def input_scaling(self, frame):
+        return frame
+
+    @property
     def max_inputs(self):
         return np.inf
 
@@ -223,9 +230,12 @@ class Device:
     def __trigger_target(self):
         # TODO: Get buffer size depending on pre-trigger value
         data_buffer = collections.deque(maxlen=10)
-
-        # TODO: Get trigger scaling if needed
-        trigger_scaling = 1
+        for trigger in self.__triggers:
+            trigger.setup()
+            if trigger.use_calibrations:
+                trigger.calibrations = self.calibrations
+            else:
+                trigger.calibrations = np.ones(len(self.inputs))
 
         while not self.__trigger_stop_event.is_set():
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
@@ -234,8 +244,9 @@ class Device:
             except queue.Empty:
                 continue
             # Execute all triggering conditions
+            scaled_frame = self.input_scaling(this_frame)
             for trig in self.__triggers:
-                trig(this_frame * trigger_scaling)
+                trig(scaled_frame)
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
@@ -249,8 +260,9 @@ class Device:
                 this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 break
+            scaled_frame = self.input_scaling(this_frame)
             for trig in self.__triggers:
-                trig(this_frame * trigger_scaling)
+                trig(scaled_frame)
             data_buffer.append(this_frame)
             if self.input_active.is_set():
                 while len(data_buffer) > 0:
@@ -368,13 +380,14 @@ class Trigger:
             except TypeError:
                 self.false_actions.append(false_action)
         self._device = None
+        self.use_calibrations = False
 
     def __call__(self, frame):
         # We need to perform the test event if the triggering is disabled
         # Some triggers (RMSTrigger) needs to update their state continiously to work as intended
         # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
         # start form zero
-        test = self.test(frame)
+        test = self.test(frame * self.calibrations)
         if self.active.is_set():
             # logger.debug('Testing in {}'.format(self.__class__.__name__))
             if test:
@@ -386,6 +399,9 @@ class Trigger:
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
 
     def reset(self):
+        pass
+
+    def setup(self):
         pass
 
 
