@@ -2,43 +2,32 @@ import numpy as np
 import threading
 import logging
 
-from . import core
-from .utils import LevelDetector
+from . import core, utils
 
 logger = logging.getLogger(__name__)
 
 
 class RMSTrigger(core.Trigger):
-    def __init__(self, *, level, channel, fs, action=None, region='Above', **kwargs):
-        core.Trigger.__init__(self, action=action)
-        self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
+    def __init__(self, level, channel, region='Above', level_detector_args=None, **kwargs):
+        core.Trigger.__init__(self, **kwargs)
+        self.channel = channel
+        # self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
         self.region = region
         self.trigger_level = level
+        self.level_detector_args = level_detector_args if level_detector_args is not None else {}
 
-    # TODO: If the loop is not fast enough there are a few options.
-    # If we drop the possibility for separate attack and release times, the level detector is
-    # just a IIR filter, so we could use scipy.signal.lfilter([1, (1-alpha)], alpha, input_levels)
-    # It should also be possible (I think) to write the level detector using Faust, and just drop in the
-    # wrapped Faust code here. If I manage to get that working it could also be used for all other crazy
-    # filters we might want to use.
+    def setup(self):
+        core.Trigger.setup(self)
+        self.level_detector = utils.LevelDetector(channel=self.channel, fs=self._device.fs, **self.level_detector_args)
+
     def test(self, frame):
         # logger.debug('Testing in RMS trigger')
         levels = self.level_detector(frame)
         return any(self._sign * levels > self.trigger_level * self._sign)
 
-    # def __call__(self, frame):
-    #     # trigger_on = self._event.is_set()
-    #     # logger.debug('RMSTrigger called!')
-    #     levels = self.level_detector(frame)
-
-    #     # This will switch the state if the trigger level is passed at least once
-    #     # It should be more robust for transients: If there is a transient that turns on the triggering
-    #     # we do not care if the level dropped afterwards.
-    #     if any(self._kind_sign * levels > self.trigger_level * self._kind_sign):
-    #         logger.debug('Trigger active')
-    #         [action() for action in self.active_actions]
-    #     else:
-    #         [action() for action in self.deactive_actions]
+    def reset(self):
+        core.Trigger.reset(self)
+        self.level_detector.reset()
 
     @property
     def region(self):
@@ -58,9 +47,8 @@ class RMSTrigger(core.Trigger):
 
 
 class PeakTrigger(core.Trigger):
-    def __init__(self, *, level, channel, action, region='Above'):
-        core.Trigger.__init__(self, action=action)
-        # self.action = action
+    def __init__(self, level, channel, region='Above', **kwargs):
+        core.Trigger.__init__(self, **kwargs)
         self.region = region
         self.trigger_level = level
         self.channel = channel
@@ -69,11 +57,6 @@ class PeakTrigger(core.Trigger):
         # logger.debug('Testing in Peak triggger')
         levels = np.abs(frame[self.channel])
         return any(self._sign * levels > self.trigger_level * self._sign)
-
-    # def __call__(self, frame):
-    #     levels = np.abs(frame[channel])
-    #     if any(self._sign * levels > self.trigger_level * self._sign):
-    #         self.action()
 
     @property
     def region(self):

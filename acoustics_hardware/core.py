@@ -200,6 +200,8 @@ class Device:
             trigger.reset()
         for generator in self.__generators:
             generator.reset()
+        self.input_active.clear()
+        self.output_active.clear()
 
     def _Device__main_target(self):
         # The explicit naming of this method is needed on windows for some stange reason.
@@ -243,10 +245,6 @@ class Device:
         data_buffer = collections.deque(maxlen=10)
         for trigger in self.__triggers:
             trigger.setup()
-            if trigger.use_calibrations:
-                trigger.calibrations = self.calibrations
-            else:
-                trigger.calibrations = np.ones(len(self.inputs))
 
         while not self.__trigger_stop_event.is_set():
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
@@ -410,10 +408,14 @@ class Trigger:
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
 
     def reset(self):
-        pass
+        self.active.set()
 
     def setup(self):
-        pass
+        if self.use_calibrations:
+            self.calibrations = self._device.calibrations
+        else:
+            self.calibrations = np.ones(len(self._device.inputs))
+
 
 
 class Generator:

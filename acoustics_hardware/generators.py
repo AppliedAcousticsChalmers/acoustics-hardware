@@ -31,6 +31,7 @@ class QGenerator(core.Generator):
         return np.concatenate(gen_frame, axis=-1)
 
     def reset(self):
+        core.Generator.reset(self)
         utils.flush_Q(self.Q)
 
 
@@ -60,6 +61,7 @@ class ArbitrarySignalGenerator(core.Generator):
         return np.concatenate(gen_frame, axis=-1)
 
     def reset(self):
+        core.Generator.reset(self)
         self.signal = None
         self.idx = 0
         self.repetitions_done = 0
@@ -70,6 +72,7 @@ class ArbitrarySignalGenerator(core.Generator):
         in `self.signal`. Access the underlying device as `self._device`, which has
         important properties, e.g. samplerate `fs`.
         """
+        core.Generator.setup(self)
         if 'signal' in self.kwargs:
             self.signal = self.kwargs['signal']
 
@@ -84,6 +87,7 @@ class SweepGenerator(ArbitrarySignalGenerator):
         self.bidirectional = bidirectional
 
     def setup(self):
+        ArbitrarySignalGenerator.setup(self)
         time_vector = np.arange(round(self.duration * self._device.fs)) / self._device.fs
         self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
         if self.bidirectional:
@@ -97,6 +101,7 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
         self.order = order
 
     def setup(self):
+        ArbitrarySignalGenerator.setup(self)
         self.sequence, state = max_len_seq(self.order)
         self.signal = 1 - 2 * self.sequence
 
@@ -129,12 +134,14 @@ class FunctionGenerator(core.Generator):
         return self.amplitude * frame
 
     def setup(self):
+        core.Generator.setup(self)
         self.reset()
         taps = np.arange(self._device.framesize)
         self._phase_array = 2 * np.pi * taps * self.frequency / self._device.fs
         self._phase_per_frame = 2 * np.pi * self.frequency / self._device.fs * self._device.framesize
 
     def reset(self):
+        core.Generator.reset(self)
         self._phase = self.phase_offset
 
     @property
@@ -224,9 +231,11 @@ class NoiseGenerator(core.Generator):
         return self._call_methods[self.method](self)
 
     def setup(self):
+        core.Generator.setup(self)
         self._setup_methods[self.method](self)
 
     def reset(self):
+        core.Generator.reset(self)
         self._reset_methods[self.method](self)
 
     @property

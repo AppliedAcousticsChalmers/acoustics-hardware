@@ -46,13 +46,13 @@ def calibrate(device_handler, channel, frequency=1e3, rms=1):
 
 
 class LevelDetector:
-    def __init__(self, *, channel, fs, time_constant=50e-3):
+    def __init__(self, channel, fs, time_constant=50e-3):
         self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
         self.time_constant = time_constant
 
         # TODO: Multichannel level detector?
         self.channel = channel
-        self._buffer = np.atleast_1d(0)
+        self.reset()
 
     def __call__(self, block):
         # TODO: Enable custom mappings?
@@ -60,6 +60,9 @@ class LevelDetector:
         input_levels = block[self.channel]**2
         output_levels, self._buffer = lfilter([self._digital_constant], [1, self._digital_constant - 1], input_levels, zi=self._buffer)
         return output_levels**0.5
+
+    def reset(self):
+        self._buffer = np.atleast_1d(0)
 
     @property
     def time_constant(self):
