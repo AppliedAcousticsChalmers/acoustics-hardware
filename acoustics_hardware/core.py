@@ -23,8 +23,6 @@ class Device:
     _trigger_timeout = 1
     _q_timeout = 1
     _hardware_timeout = 1
-    _attr_timeout = 0.05
-    _attr_response_timeout = 1
 
     def __init__(self):
         # self.input_active = multiprocessing.Event()
@@ -34,10 +32,6 @@ class Device:
 
         self.inputs = []
         self.outputs = []
-        # self.__attr_request_Q = multiprocessing.Queue()
-        self.__attr_request_Q = queue.Queue()
-        # self.__attr_response_Q = multiprocessing.Queue()
-        self.__attr_response_Q = queue.Queue()
 
         self.__generators = []
         self.__triggers = []
