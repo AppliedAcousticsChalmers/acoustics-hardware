@@ -122,6 +122,17 @@ class Device:
         for q in self.__Qs:
             utils.flush_Q(q)
 
+    def calibrate(self, channel, frequency=1e3, value=1, type='rms', unit='V'):
+        # TODO: Is this a good value for the time_constant?
+        detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
+        timer = threading.Timer(interval=3, funciton=lambda x: self.__triggers.remove(x), args=detector)
+        self.__triggers.append(detector)
+        timer.start()
+        timer.join()
+        channel = self.inputs[self.inputs.index(channel)]
+        channel.calibration = detector.current_level / value
+        channel.unit = unit
+
     @property
     def input_Q(self):
         if self.__main_thread.is_alive():
