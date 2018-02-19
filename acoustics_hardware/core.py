@@ -307,23 +307,6 @@ class Device:
                 except GeneratorStop:
                     self.output_active.clear()
 
-    def _update_attrs(self):
-        changed = False
-        while True:
-            try:
-                item = self.__attr_request_Q.get(timeout=self._attr_timeout)
-            except queue.Empty:
-                # No more pending messages
-                break
-            if len(item) == 2:
-                # We are setting from remote process
-                setattr(self, *item)
-                changed = True
-            else:
-                # We received a request for some property
-                self.__attr_response_Q.put(getattr(self, item))
-        return changed
-
 
 class Channel:
     def __init__(self, index, chtype, label=None, calibration=None, unit=None):
@@ -343,29 +326,6 @@ class Channel:
 
     def __int__(self):
         return self.index
-
-
-class InterProcessAttr:
-    def __init__(self, attr):
-        self.attr = '_' + attr
-
-    def __get__(self, obj, objtype):
-        # if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
-        if obj._Device__main_thread.is_alive():
-            # The process is running, and we are trying to access it from a another process
-            obj._Device__attr_request_Q.put(self.attr)  # Create a request for the attribute
-            val = obj._Device__attr_response_Q.get(timeout=obj._attr_response_timeout)  # Wait for the response
-            setattr(obj, self.attr, val)  # Update the local attribute
-            return val
-        else:
-            return getattr(obj, self.attr)
-
-    def __set__(self, obj, val):
-        setattr(obj, self.attr, val)
-        # if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
-        if obj._Device__main_thread.is_alive():
-            # The device subprocess has started, and we are setting it from another process
-            obj._Device__attr_request_Q.put((self.attr, val))
 
 
 class Trigger:
