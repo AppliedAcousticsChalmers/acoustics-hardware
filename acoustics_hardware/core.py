@@ -125,7 +125,7 @@ class Device:
     def calibrate(self, channel, frequency=1e3, value=1, type='rms', unit='V'):
         # TODO: Is this a good value for the time_constant?
         detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
-        timer = threading.Timer(interval=3, funciton=lambda x: self.__triggers.remove(x), args=detector)
+        timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
         self.__triggers.append(detector)
         timer.start()
         timer.join()
@@ -214,7 +214,7 @@ class Device:
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
-        generator_thread = threading.Thread(targe=self.__generator_target)
+        generator_thread = threading.Thread(target=self.__generator_target)
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
         q_thread = threading.Thread(target=self.__q_target)
@@ -341,7 +341,7 @@ class Channel:
             chtype_eq = self.chtype == other.chtype
         except AttributeError:
             chtype_eq = True
-        return self.idx == other and chtype_eq
+        return self.index == other and chtype_eq
 
     def __int__(self):
         return self.index
