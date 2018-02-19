@@ -32,6 +32,8 @@ class Device:
         # self.output_active = multiprocessing.Event()
         self.output_active = threading.Event()
 
+        self.inputs = []
+        self.outputs = []
         # self.__attr_request_Q = multiprocessing.Queue()
         self.__attr_request_Q = queue.Queue()
         # self.__attr_response_Q = multiprocessing.Queue()
@@ -59,6 +61,22 @@ class Device:
         # self.__process.join(timeout=10)
         # TODO: We will not wait for the process now, since it will not finish if there are
         # items left in the Q.
+
+    def add_input(self, index, **kwargs):
+        if index not in self.inputs and index < self.max_inputs:
+            self.inputs.append(Channel(index, 'input', **kwargs))
+
+    def add_output(self, index, **kwargs):
+        if index not in self.outpts and index < self.max_outputs:
+            self.outputs.append(Channel(index, 'output', **kwargs))
+
+    @property
+    def max_inputs(self):
+        return np.inf
+
+    @property
+    def max_outputs(self):
+        return np.inf
 
     def _hardware_run(self):
         '''
@@ -284,6 +302,26 @@ class Device:
                 # We received a request for some property
                 self.__attr_response_Q.put(getattr(self, item))
         return changed
+
+
+class Channel:
+    def __init__(self, index, chtype, label=None, calibration=None, unit=None):
+        self.index = index
+        self.chtype = chtype
+        self.label = label
+        self.calibration = calibration
+        self.unit = unit
+
+    # TODO: Custom printer
+    def __eq__(self, other):
+        try:
+            chtype_eq = self.chtype == other.chtype
+        except AttributeError:
+            chtype_eq = True
+        return self.idx == other and chtype_eq
+
+    def __int__(self):
+        return self.index
 
 
 class InterProcessAttr:

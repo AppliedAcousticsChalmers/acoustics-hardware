@@ -44,17 +44,6 @@ class NIDevice(core.Device):
         self.framesize = framesize  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
         # The device buffer size can be accessed via the task in/out stream, but these are tricky to access.
         self.dtype = dtype
-        self.inputs = []
-        self.outputs = []
-
-    def add_input(self, idx):
-        # TODO: Maybe some kind af assertion that the idx is OK?
-        if idx not in self.inputs and idx < self.max_inputs:
-            self.inputs.append(idx)
-
-    def add_output(self, idx):
-        if idx not in self.outputs and idx < self.max_outputs:
-            self.outputs.append(idx)
 
     @property
     def max_inputs(self):
@@ -111,9 +100,9 @@ class NIDevice(core.Device):
     def _hardware_run(self):
         self._task = nidaqmx.Task()
         for ch in self.inputs:
-            self._task.ai_channels.add_ai_voltage_chan(self.name + '/ai{}'.format(ch))
+            self._task.ai_channels.add_ai_voltage_chan(self.name + '/ai{}'.format(int(ch)))
         for ch in self.outputs:
-            self._task.ao_channels.add_ao_voltage_chan(self.name + '/ao{}'.format(ch), min_val=self.output_range[0], max_val=self.output_range[1])
+            self._task.ao_channels.add_ao_voltage_chan(self.name + '/ao{}'.format(int(ch)), min_val=self.output_range[0], max_val=self.output_range[1])
         if len(self.inputs) or len(self.outputs):
             self._task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
                     sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
