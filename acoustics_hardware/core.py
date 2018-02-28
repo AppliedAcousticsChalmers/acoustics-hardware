@@ -1,7 +1,9 @@
 import queue
 import threading
-import multiprocessing
+# import multiprocessing
 import collections
+import numpy as np
+from . import utils
 
 
 class Device:
@@ -17,48 +19,65 @@ class Device:
     See the documentation of these for more information.
 
     """
+    _generator_timeout = 1
     _trigger_timeout = 1
     _q_timeout = 1
     _hardware_timeout = 1
-    _attr_timeout = 0.05
-    _attr_response_timeout = 1
 
     def __init__(self):
-        self.input_active = multiprocessing.Event()
-        self.output_active = multiprocessing.Event()
-        self._hardware_output_Q = multiprocessing.Queue()
+        # self.input_active = multiprocessing.Event()
+        self.input_active = threading.Event()
+        # self.output_active = multiprocessing.Event()
+        self.output_active = threading.Event()
 
-        # self._hardware_input_Q = queue.Queue()
-        # self._hardware_stop_event = threading.Event()
-        # self.__triggered_q = queue.Queue()
-        # self.__trigger_stop_event = threading.Event()
-        # self.__q_stop_event = threading.Event()
+        self.inputs = []
+        self.outputs = []
 
-        # self._hardware_input_Q = multiprocessing.Queue()
-        # self._hardware_stop_event = multiprocessing.Event()
-        # self.__triggered_q = multiprocessing.Queue()
-        # self.__q_stop_event = multiprocessing.Event()
-        # self.__trigger_stop_event = multiprocessing.Event()
-        self.__attr_request_Q = multiprocessing.Queue()
-        self.__attr_response_Q = multiprocessing.Queue()
-
+        self.__generators = []
         self.__triggers = []
         self.__Qs = []
 
-        self.__process_stop_event = multiprocessing.Event()
-        self.__process = multiprocessing.Process()
+        # self.__main_stop_event = multiprocessing.Event()
+        self.__main_stop_event = threading.Event()
+        # self.__main_thread = multiprocessing.Process()
+        self.__main_thread = threading.Thread()
 
     def start(self):
         # TODO: Documentation
-        self.__process = multiprocessing.Process(target=self._Device__process_target)
-        self.__process.start()
+        # self.__main_thread = multiprocessing.Process(target=self._Device__main_target)
+        self.__main_thread = threading.Thread(target=self._Device__main_target)
+
+        self.__main_thread.start()
 
     def stop(self):
         # TODO: Documentation
-        self.__process_stop_event.set()
+        self.__main_stop_event.set()
         # self.__process.join(timeout=10)
         # TODO: We will not wait for the process now, since it will not finish if there are
         # items left in the Q.
+
+    def add_input(self, index, **kwargs):
+        if index not in self.inputs and index < self.max_inputs:
+            self.inputs.append(Channel(index, 'input', **kwargs))
+
+    def add_output(self, index, **kwargs):
+        if index not in self.outpts and index < self.max_outputs:
+            self.outputs.append(Channel(index, 'output', **kwargs))
+
+    @property
+    def calibrations(self):
+        return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
+
+    def input_scaling(self, frame):
+        return frame
+
+    @property
+    def max_inputs(self):
+        return np.inf
+
+    @property
+    def max_outputs(self):
+        return np.inf
 
     def _hardware_run(self):
         '''
@@ -71,15 +90,6 @@ class Device:
             `_hardware_stop_event`: Tells the hardware thread to stop, see `_hardware_stop` and `_hardware_reset`
         '''
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
-
-    def _hardware_setup(self):
-        '''
-        This is responsible for setting up the hardware.
-        Note that this will be run in a separate process,
-        so there must be no connections to the hardware
-        from the first process.
-        '''
-        pass
 
     def _hardware_stop(self):
         '''
@@ -103,29 +113,33 @@ class Device:
         Used to flush all Qs so that processes can terminate.
         THIS WILL DELETE DATA which is still in the Qs
         '''
-        for Q in self.__Qs:
-            while True:
-                try:
-                    Q.get(timeout=0.1)
-                except queue.Empty:
-                    break
-        while True:
-            try:
-                self.output_Q.get(timeout=0.1)
-            except queue.Empty:
-                break
+        for q in self.__Qs:
+            utils.flush_Q(q)
 
-    def get_new_Q(self):
-        if self.__process.is_alive():
+    def calibrate(self, channel, frequency=1e3, value=1, type='rms', unit='V'):
+        # TODO: Is this a good value for the time_constant?
+        detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
+        timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
+        self.__triggers.append(detector)
+        timer.start()
+        timer.join()
+        channel = self.inputs[self.inputs.index(channel)]
+        channel.calibration = detector.current_level / value
+        channel.unit = unit
+
+    @property
+    def input_Q(self):
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
-            Q = multiprocessing.Queue()
+            # Q = multiprocessing.Queue()
+            Q = queue.Queue()
             self.__Qs.append(Q)
             return Q
 
     def remove_Q(self, Q):
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
@@ -138,51 +152,78 @@ class Device:
         # This only exists to have consistent naming conventions (_hardware_input_Q, _hardware_output_Q) for subclassing
         return self._hardware_output_Q
 
-    def register_trigger(self, trigger):
+    def add_trigger(self, trigger):
         # TODO: Documentation
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
-            raise UserWarning('It is not possible to register new triggers while the device is running. Stop the device and perform all setup before starting.')
+            raise UserWarning('It is not possible to add new triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.append(trigger)
+            trigger._device = self
 
     def remove_trigger(self, trigger):
         # TODO: Documentation
-        if self.__process.is_alive():
+        if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.remove(trigger)
+            trigger._device = None
+
+    def add_generator(self, generator):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__generators.append(generator)
+            generator._device = self
+
+    def remove_generator(self, generator):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__generators.remove(generator)
+            generator._device = None
 
     def __reset(self):
-        self.__process_stop_event.clear()
+        self.__main_stop_event.clear()
         self.__trigger_stop_event.clear()
         self.__q_stop_event.clear()
         self._hardware_reset()
         self._hardware_stop_event.clear()
+        for trigger in self.__triggers:
+            trigger.reset()
+        for generator in self.__generators:
+            generator.reset()
+        self.input_active.clear()
+        self.output_active.clear()
 
-    def _Device__process_target(self):
+    def _Device__main_target(self):
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
+        self._hardware_output_Q = queue.Queue()
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
+        self.__generator_stop_event = threading.Event()
         self.__trigger_stop_event = threading.Event()
         self.__q_stop_event = threading.Event()
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
-        self._hardware_setup()
+        generator_thread = threading.Thread(target=self.__generator_target)
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
         q_thread = threading.Thread(target=self.__q_target)
 
+        generator_thread.start()
         hardware_thread.start()
         trigger_thread.start()
         q_thread.start()
 
-        self.__process_stop_event.wait()
+        self.__main_stop_event.wait()
 
+        self.__generator_stop_event.set()
+        generator_thread.join()
         self._hardware_stop()
         hardware_thread.join()
         self.__trigger_stop_event.set()
@@ -196,9 +237,8 @@ class Device:
     def __trigger_target(self):
         # TODO: Get buffer size depending on pre-trigger value
         data_buffer = collections.deque(maxlen=10)
-
-        # TODO: Get trigger scaling if needed
-        trigger_scaling = 1
+        for trigger in self.__triggers:
+            trigger.setup()
 
         while not self.__trigger_stop_event.is_set():
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
@@ -207,8 +247,9 @@ class Device:
             except queue.Empty:
                 continue
             # Execute all triggering conditions
+            scaled_frame = self.input_scaling(this_frame)
             for trig in self.__triggers:
-                trig(this_frame * trigger_scaling)
+                trig(scaled_frame)
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
@@ -222,8 +263,9 @@ class Device:
                 this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 break
+            scaled_frame = self.input_scaling(this_frame)
             for trig in self.__triggers:
-                trig(this_frame * trigger_scaling)
+                trig(scaled_frame)
             data_buffer.append(this_frame)
             if self.input_active.is_set():
                 while len(data_buffer) > 0:
@@ -249,52 +291,46 @@ class Device:
             for Q in self.__Qs:
                 Q.put(this_frame)
 
-    def _update_attrs(self):
-        changed = False
-        while True:
-            try:
-                item = self.__attr_request_Q.get(timeout=self._attr_timeout)
-            except queue.Empty:
-                # No more pending messages
-                break
-            if len(item) == 2:
-                # We are setting from remote process
-                setattr(self, *item)
-                changed = True
-            else:
-                # We received a request for some property
-                self.__attr_response_Q.put(getattr(self, item))
-        return changed
+    def __generator_target(self):
+        for generator in self.__generators:
+            generator.setup()
+        while not self.__generator_stop_event.is_set():
+            if self.output_active.wait(timeout=self._generator_timeout):
+                try:
+                    self._hardware_output_Q.put(np.concatenate([generator() for generator in self.__generators]))
+                except GeneratorStop:
+                    self.output_active.clear()
 
 
-class InterProcessAttr:
-    def __init__(self, attr):
-        self.attr = '_' + attr
+class Channel:
+    def __init__(self, index, chtype, label=None, calibration=None, unit=None):
+        self.index = index
+        self.chtype = chtype
+        self.label = label
+        self.calibration = calibration
+        self.unit = unit
 
-    def __get__(self, obj, objtype):
-        if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
-            # The process is running, and we are trying to access it from a another process
-            obj._Device__attr_request_Q.put(self.attr)  # Create a request for the attribute
-            val = obj._Device__attr_response_Q.get(timeout=obj._attr_response_timeout)  # Wait for the response
-            setattr(obj, self.attr, val)  # Update the local attribute
-            return val
-        else:
-            return getattr(obj, self.attr)
+    # TODO: Custom printer
+    def __eq__(self, other):
+        try:
+            chtype_eq = self.chtype == other.chtype
+        except AttributeError:
+            chtype_eq = True
+        return self.index == other and chtype_eq
 
-    def __set__(self, obj, val):
-        setattr(obj, self.attr, val)
-        if obj._Device__process.is_alive() and obj._Device__process is not multiprocessing.current_process():
-            # The device subprocess has started, and we are setting it from another process
-            obj._Device__attr_request_Q.put((self.attr, val))
+    def __int__(self):
+        return self.index
 
 
 class Trigger:
     # TODO: Documentation
-    def __init__(self, action=None, false_action=None):
-        self.active = multiprocessing.Event()
+    def __init__(self, action=None, false_action=None, auto_deactivate=True):
+        # self.active = multiprocessing.Event()
+        self.active = threading.Event()
         self.active.set()
 
         self.actions = []
+        self.auto_deactivate = auto_deactivate
         if action is not None:
             try:
                 self.actions.extend(action)
@@ -307,13 +343,15 @@ class Trigger:
                 self.false_actions.extend(false_action)
             except TypeError:
                 self.false_actions.append(false_action)
+        self._device = None
+        self.use_calibrations = False
 
     def __call__(self, frame):
         # We need to perform the test event if the triggering is disabled
         # Some triggers (RMSTrigger) needs to update their state continiously to work as intended
         # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
         # start form zero
-        test = self.test(frame)
+        test = self.test(frame * self.calibrations)
         if self.active.is_set():
             # logger.debug('Testing in {}'.format(self.__class__.__name__))
             if test:
@@ -323,6 +361,44 @@ class Trigger:
 
     def test(self, frame):
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
+
+    def reset(self):
+        self.active.set()
+
+    def setup(self):
+        if self.use_calibrations:
+            self.calibrations = self._device.calibrations
+        else:
+            self.calibrations = np.ones(len(self._device.inputs))
+
+    @property
+    def auto_deactivate(self):
+        return self.active.clear in self.actions
+
+    @auto_deactivate.setter
+    def auto_deactivate(self, value):
+        if value and not self.auto_deactivate:
+            self.actions.insert(0, self.active.clear)
+        elif self.auto_deactivate and not value:
+            self.actions.remove(self.active.clear)
+
+
+class Generator:
+    def __init__(self):
+        self._device = None
+
+    def __call__(self):
+        raise NotImplementedError('Generators must be callable. Implement `__call__` in {}'.format(self.__class__.__name__))
+
+    def reset(self):
+        pass
+
+    def setup(self):
+        pass
+
+
+class GeneratorStop(Exception):
+        pass
 
 
 class Printer(Device):

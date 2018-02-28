@@ -5,7 +5,7 @@ import schunk
 from . import core
 
 
-def getDevices(name=None):
+def get_devices(name=None):
     from serial.tools.list_ports import comports
     devs = comports()
 
@@ -30,152 +30,121 @@ def getDevices(name=None):
     # to devices that might respond and do something unspecified
 
 
-class SerialDevice(core.Device):
-    def __init__(self, name):
-        core.Device.__init__(self)
-        self.name = getDevices(name)
-        self.sweeps = 0  # 0 gives steady signal, positive number gives that many sweeps, -1 gives infinite sweeps
-        self.shape = 'sine'
-        self.frequency = 1e3
-        self.frequency_start = 1e3
-        self.frequency_stop = 4e3
-        self.sweep_time = 1
-        self.sweep_spacing = 'log'
-        self.amplitude = 1
-
-    sweeps = core.InterProcessAttr('sweeps')
-    shape = core.InterProcessAttr('shape')
-    frequency = core.InterProcessAttr('frequency')
-    frequency_start = core.InterProcessAttr('frequency_start')
-    frequency_stop = core.InterProcessAttr('frequency_stop')
-    sweep_time = core.InterProcessAttr('sweep_time')
-    sweep_spacing = core.InterProcessAttr('sweep_spacing')
-    amplitude = core.InterProcessAttr('amplitude')
-
-    def _write(self, *commands):
-        for command in commands:
-            self.ser.write(bytes(command + '\n', 'UTF-8'))
-
-    def _off(self):
-        self._write('apply:DC DEF, DEF, 0')
-
-    def _hardware_setup(self):
-        self.ser = Serial(port=self.name, timeout=1, dsrdtr=True)
-        self._write('system:remote')
-        self._off()
-
-    def _hardware_reset(self):
-        self.ser.close()
-
-    def _sweep_setup(self):
-        self._write(
-            'frequency:start {}'.format(self.frequency_start),
-            'frequency:stop {}'.format(self.frequency_stop),
-            'sweep:time {}'.format(self.sweep_time),
-            'sweep:spacing {}'.format(self.sweep_spacing)
-        )
-
-    def _hardware_run(self):
-        active = False
-        if self.sweeps != 0:
-            self._sweep_setup()
-        while not self._hardware_stop_event.is_set():
-            changes = self._update_attrs()
-            if self.sweeps == 0:
-                # We are using continious output, check if it should be toggled or not
-                if active:
-                    # Output currently active, check if we should deactivate
-                    if not self.output_active.is_set():
-                        self._off()
-                        active = False
-                        # TODO: Will we need time.sleep here? We cannot wait for event to clear,
-                        # so the current implementation will only check the event and proceed imediately
-                    elif changes:
-                        self._write('apply:{} {}, {}'.format(self.shape[:3], self.frequency, self.amplitude))
-                else:
-                    # Output currently inactive, wait for activation signal
-                    if self.output_active.wait(self._hardware_timeout):
-                        # TODO: Is this the correct sequencing of the commands?
-                        self._write('apply:{} {}, {}'.format(self.shape[:3], self.frequency, self.amplitude))
-                        active = True
-
-            else:  # Sweeping mode
-                if changes:
-                    self._sweep_setup()
-                if self.sweeps > 0:
-                    # Finite number of sweeps
-                    if self.output_active.wait(timeout=self._hardware_timeout):
-                        # Do the required sweeps
-                        self._write(
-                            'func:shape {}'.format(self.shape[:3]),
-                            'trigger:source bus',
-                            'sweep:state on',
-                            'volt {}'.format(self.amplitude))
-                        for idx in range(self.sweeps):
-                            self._write('*TRG')
-                        self._write('*WAI')
-                        self._off()
-                        self.output_active.clear()
-                else:
-                    # Infinite number of sweeps
-                    if active:
-                        # Output currently active, check if we should deactivate
-                        if not self.output_active.is_set():
-                            self._off()
-                            active = False
-                            # TODO: Will we need time.sleep here? We cannot wait for event to clear,
-                            # so the current implementation will only check the event and proceed imediately
-                    else:
-                        # Output currently inactive, wait for activation signal
-                        if self.output_active.wait(self._hardware_timeout):
-                            # TODO: Is this the correct sequencing of the commands?
-                            self._write(
-                                'func:shape {}'.format(self.shape[:3]),
-                                'volt {}'.format(self.amplitude),
-                                'sweep:state on')
-                            active = True
-
-
-class SerialInstrument:  # (Thread):
-    def __init__(self, device=''):
+class SerialGenerator:  # (Thread):
+    def __init__(self, name, frequency=1e3, amplitude=1, output_unit='rms', shape='sine',
+                 sweeps=0, sweep_time=1, sweep_start=100, sweep_stop=1e3, sweep_spacing='log'):
         # Thread.__init__(self)
-        self.device = getDevices(device)
+        self.device = get_devices(name)
         self.ser = Serial(port=self.device, timeout=1, dsrdtr=True)
-        self._write('system:remote')
-        self.amplitude = 1
+        self._write('system:remote', 'output:load inf')
+        self.output_unit = output_unit
+        self.amplitude = amplitude
+        self.frequency = frequency
+        self.shape = shape
+        self.sweeps = sweeps
+        self.sweep_time = sweep_time
+        self.sweep_start = sweep_start
+        self.sweep_stop = sweep_stop
+        self.sweep_spacing = sweep_spacing
+        self._prev_sweep_settings = {
+            'time': None,
+            'start': None,
+            'stop': None,
+            'spacing': None
+        }
 
     def __del__(self):
         self.ser.close()
 
-    def _write(self, command):
+    def _write(self, *commands):
         '''
         Wrapper for writing to connected device
         '''
-        self.ser.write(bytes(command + '\n', 'UTF-8'))
+        for command in commands:
+            self.ser.write(bytes(command + '\n', 'UTF-8'))
 
-    def sweep_settings(self, *, low, high, time, spacing='log'):
-        self._write('frequency:start {}'.format(low))
-        self._write('frequency:stop {}'.format(high))
-        self._write('sweep:time {}'.format(time))
-        self._write('sweep:spacing {}'.format(spacing))
+    def _read(self):
+        return self.ser.readline().decode()[:-2]
 
-    def single_sweep(self):
-        # We need to set the instrument to sine before we set the trigger source, and the amplitude before we start the sweep
-        self._write('func:shape sin')
-        self._write('trigger:source bus')
-        self._write('sweep:state on')
-        self._write('volt {}'.format(self.amplitude))
-        self._write('*TRG')
-        self._write('*WAI')
-        self.off()
+    def check_errors(self):
+        errors = []
+        while True:
+            self._write('system:error?')
+            error = self._read()
+            if error == '+0,"No error"':
+                break
+            else:
+                errors.append(error)
+        if len(errors) == 0:
+            return False
+        else:
+            return errors
+
+    def _sweep_setup(self):
+        if not self.sweep_start == self._prev_sweep_settings['start']:
+            self._prev_sweep_settings['start'] = self.sweep_start
+            self._write('frequency:start {}'.format(self.sweep_start))
+        if not self.sweep_stop == self._prev_sweep_settings['stop']:
+            self._prev_sweep_settings['stop'] = self.sweep_stop
+            self._write('frequency:stop {}'.format(self.sweep_stop))
+        if not self.sweep_time == self._prev_sweep_settings['time']:
+            self._prev_sweep_settings['time'] = self.sweep_time
+            self._write('sweep:time {}'.format(self.sweep_time))
+        if not self.sweep_spacing == self._prev_sweep_settings['spacing']:
+            self._prev_sweep_settings['spacing'] = self.sweep_spacing
+            self._write('sweep:spacing {}'.format(self.sweep_spacing))
 
     def off(self):
         self._write('apply:DC DEF, DEF, 0')
 
-    def sine(self, frequency, amplitude=None):
-        if amplitude is None:
-            amplitude = self.amplitude
-        self._write('apply:sin {}, {}'.format(frequency, amplitude))
+    def on(self):
+        if self.sweeps == 0:
+            self._write('apply:{} {}, {}'.format(self.shape, self.frequency, self.amplitude))
+        elif self.sweeps < 0:
+            self._sweep_setup()
+            self._write(
+                'func:shape {}'.format(self.shape),
+                'volt {}'.format(self.amplitude),
+                'sweep:state on')
+        else:
+            self._sweep_setup()
+            self._write(
+                'func:shape {}'.format(self.shape),
+                'trigger:source bus',
+                'sweep:state on',
+                'volt {}'.format(self.amplitude),
+                *self.sweeps * ('*TRG',),
+                '*WAI')
+            self.off()
+
+    @property
+    def output_unit(self):
+        self._write('voltage:unit?')
+        return self._read()
+
+    @output_unit.setter
+    def output_unit(self, value):
+        if value.lower() == 'rms':
+            self._write('voltage:unit VRMS')
+        elif value.lower() == 'peak':
+            self._write('voltage:unit VPP')
+
+    @property
+    def shape(self):
+        return self._shape
+
+    @shape.setter
+    def shape(self, value):
+        if value.lower()[:3] == 'sin':
+            self._shape = 'sinusoid'
+        elif value.lower()[:3] == 'squ':
+            self._shape = 'square'
+        elif value.lower()[:3] == 'tri':
+            self._shape = 'triangle'
+        elif value.lower()[:3] == 'noi':
+            self._shape = 'noise'
+        elif value.lower()[:3] == 'dc':
+            self._shape = 'dc'
 
 
 class VariSphere:
