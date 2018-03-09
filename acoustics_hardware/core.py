@@ -4,6 +4,7 @@ import threading
 import collections
 import numpy as np
 from . import utils
+import json
 
 
 class Device:
@@ -303,6 +304,10 @@ class Device:
 
 
 class Channel:
+    @classmethod
+    def from_json(cls, json_dict):
+        return cls(**json.loads(json_dict))
+
     def __init__(self, index, chtype, label=None, calibration=None, unit=None):
         self.index = index
         self.chtype = chtype
@@ -310,7 +315,6 @@ class Channel:
         self.calibration = calibration
         self.unit = unit
 
-    # TODO: Custom printer
     def __eq__(self, other):
         try:
             chtype_eq = self.chtype == other.chtype
@@ -320,6 +324,17 @@ class Channel:
 
     def __int__(self):
         return self.index
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(' + ', '.join(['{}={}'.format(key, value) for key, value in self.__dict__.items()]) + ')'
+
+    def __str__(self):
+        label_str = '' if self.label is None else ' "{}"'.format(self.label)
+        calib_str = '' if self.calibration is None else ' ({:.4g} {})'.format(self.calibration, self.unit)
+        return '{chtype} channel {index}{label}{calib}'.format(chtype=self.chtype, index=self.index, label=label_str, calib=calib_str).capitalize()
+
+    def to_json(self):
+        return json.dumps(self.__dict__)
 
 
 class Trigger:
