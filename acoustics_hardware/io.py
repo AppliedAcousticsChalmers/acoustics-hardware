@@ -1,173 +1,329 @@
 import os.path
 import h5py
 import numpy as np
+import multiprocessing
+import threading
+import queue
 
 
 class HDFWriter:
     """ Implements writing to HDF 5 files """
+    _timeout = 0.1
 
     def __init__(self, filename=None):
         if filename is None:
-            # TODO: Raise warning and continue
             filename = 'data'  # Default filename
 
         name, ext = os.path.splitext(filename)
         if len(ext) < 2:  # Either empty or just a dot
             ext = '.h5'
             filename = name + ext
-        # if os.path.exists(filename):
-        #     # TODO: raise warning and continue
-        #     idx = 1
-        #     while os.path.exists('{}_{}{}'.format(name, idx, ext)):
-        #         idx += 1
-        #     name = '{}_{}'.format(name, idx)
-        #     filename = name + ext
         self.filename = filename
-        self.file = h5py.File(self.filename, mode='a')
-        self.group = self.file['/']
-        self.dataset = None
+        self._file = None
+        self._group = None
+        self._devices = []
+        self._input_Qs = []
+        self._internal_Q = multiprocessing.Queue()
+        self._datasets = []
+        self._manual_dataset = None
 
-        self.head = None
-        self.data_shape = None
+        self._stop_event = threading.Event()
 
-    def select_group(self, group=None):
+    def add_input(self, device=None, Q=None):
+        if device is None and Q is None:
+            raise ValueError('Either `device` or `Q` must be given as input')
+        if Q is None:
+            Q = device.input_Q
+        self._devices.append(device)
+        self._input_Qs.append(Q)
+
+    def start(self, mode='auto', use_process=True):
+        self.mode = mode
+        if use_process:
+            self._process = multiprocessing.Process(target=self._write_target)
+        else:
+            self._process = threading.Thread(target=self._write_target)
+        self._process.start()
+        if mode == 'auto':
+            self._thread = threading.Thread(target=self._auto_target)
+            self._thread.start()
+        elif mode == 'signal':
+            self._write_signal = threading.Event()
+            self._thread = threading.Thread(target=self._signal_target)
+            self._thread.start()
+        elif mode == 'manual':
+            class Dummy_thread:
+                def join():
+                    return True
+            self._thread = Dummy_thread
+
+    def stop(self):
+        self._stop_event.set()
+        self._thread.join()
+        self.write_device_configs()
+        self._internal_Q.put(None)
+        self._stop_event.clear()
+
+    def select_group(self, **kwargs):
+        self._internal_Q.put(('select', kwargs))
+
+    def _select_group(self, group=None):
         if group is None:
             group = '/'
-        self.group = self.file.require_group(group)
+        self._group = self._file.require_group(group)
 
-    def create_dataset(self, name=None, ndim=2, **kwargs):
+    def create_dataset(self, **kwargs):
+        self._internal_Q.put(('create', kwargs))
+
+    def _create_dataset(self, name=None, ndim=2, index=None, **kwargs):
         if name is None:
-            name = 'data'  # Default name for sets
+            # TODO: What if the set already exists?
+            name = 'data{}'.format(index).replace('None', '')  # Default name for sets
+        if name in self._group:
+            name_idx = 0
+            while name + '_' + str(name_idx) in self._group:
+                name_idx += 1
+            name = name + '_' + str(name_idx)
         kwargs.setdefault('shape', ndim * (1,))
         kwargs.setdefault('maxshape', ndim * (None,))
         kwargs.setdefault('dtype', 'float64')
-        self.dataset = self.group.create_dataset(name=name, **kwargs)
-        self.head = np.array(ndim * (0,))
-        self.data_shape = None
+        dataset = [self._group.create_dataset(name=name, **kwargs), np.array(ndim * (0,)), None]
+        if index is None:
+            self._manual_dataset = dataset
+        elif len(self._datasets) > index:
+            self._datasets[index] = dataset
+        else:
+            skips = index - len(self._datasets)
+            self._datasets.extend(skips * [None])
+            self._datasets.append(dataset)
+        return dataset
 
-    # def select_dataset(self, dataset=None, **kwargs):
-    #     # Selecting existing datasets this easily does not seem like a good idea
-    #     # There is no really good way to make sure that writing continues where it should
-    #     # To leave all existing data and axis lengths untouched we would need to append new
-    #     # data along the first axis, but that will **always** extend the last axis, withot
-    #     # any possibility to say something else first.
-    #     # It is probably better if users who want to reopen existing datasets do so manually
-    #     # and manually sets the head or extends using 'step'
-    #     if dataset is None:
-    #         dataset = 'data'  # Default name for sets
-    #     # if chunkshape is None:
-    #     #     chunkshape = (4, 1024)  # Default chunkshape
-    #     # if dataset in self.group:
-    #     #     idx = 1
-    #     #     while '{}_{}'.format(dataset, idx) in self.group:
-    #     #         idx += 1
-    #     #     dataset = '{}_{}'.format(dataset, idx)
-    #     if dataset in self.group:
-    #         self.dataset = self.group[dataset]
-    #         self.data_shape = None
-    #     else:
-    #         self.create_dataset(dataset, **kwargs)
-    #     # self.dataset = self.group.require_dataset(dataset, exact=False, **kwargs)
+    def write(self, **kwargs):
+        # TODO: debug the step keyword
+        # We want it to work both for True/False in both manual writes and signal mode,
+        # as well as with an index / a list of indices for the signalled mode
+        if self.mode == 'auto':
+            # TODO: raise?
+            pass
+        elif self.mode == 'signal':
+            if 'step' in kwargs:
+                for idx in range(len(self._input_Qs)):
+                    self.step(axis=kwargs['step'], index=idx)
+            self._write_signal.set()
+        elif self.mode == 'manual':
+            # TODO: Enable manual writes regardless of mode
+            # If the write function is called with some data or a Q,
+            # write that data to the manual dataset
+            idx = kwargs.pop('index', None)
+            if 'name' in kwargs:
+                create_args = kwargs.copy()
+                [create_args.pop(key, None) for key in ['Q', 'data', 'step']]
+                self.create_dataset(create_args)
+            if 'Q' in kwargs:
+                while True:
+                    try:
+                        self._internal_Q.put(('write', (kwargs['Q'].get(timeout=self._timeout), idx)))
+                    except queue.Empty:
+                        break
+            elif 'data' in kwargs:
+                self._internal_Q.put(('write', (kwargs['data'], idx)))
+            if 'step' in kwargs:
+                self.step(axis=kwargs['step'])
 
-    def write(self, data):
+    def _write_attrs(self, index=None, **kwargs):
+        if index is None:
+            attrs = self._group.attrs
+        else:
+            attrs = self._datasets[index].attrs
+        for key, value in kwargs.items():
+            attrs[key] = value
+
+    def write_attrs(self, **kwargs):
+        self._internal_Q.put(('attrs', kwargs))
+
+    def write_device_configs(self, index=None, *args, **kwargs):
+        if index is None:
+            for idx in range(len(self._devices)):
+                self.write_device_configs(index=idx, *args, **kwargs)
+        else:
+            attr_names = {'fs', 'label', 'name', 'serial_number'}
+            device = self._devices[index]
+            # Qs without devices will correspond to None here, so attrs will be an empty dict => only kwargs will be written
+            attrs = {}
+            for attr in attr_names.union(args):
+                try:
+                    value = getattr(device, attr)
+                except AttributeError:
+                    pass
+                else:
+                    attrs[attr] = value
+            try:
+                inputs = device.inputs
+            except AttributeError:
+                pass
+            else:
+                attrs['input_channels'] = np.string_([ch.to_json() for ch in inputs])
+            try:
+                outputs = device.outputs
+            except AttributeError:
+                pass
+            else:
+                attrs['output_channels'] = np.string_([ch.to_json() for ch in outputs])
+            attrs.update(kwargs)
+            self.write_attrs(index=index, **attrs)
+
+    def _write(self, data, index=None):
         # TODO: make sure that data is a ndarray?
-        self.data_shape = data.shape
-        # if self.data_shape is None:
-        #     self.data_shape = data.shape
-        # elif not self.data_shape[:-1] == data.shape[:-1]:
-        #     raise ValueError('data dimentions does not match specified dimention')
-        # if len(shape) == 1:  # Add new axis to the data
-        #     data.shape = (1, -1)
-        #     shape = data.shape
-        if self.dataset is None:
-            self.create_dataset(ndim=data.ndim, chunks=data.shape)
+        if index is None:
+            # Not an automated write from device Q
+            try:
+                dataset, head, _ = self._manual_dataset
+            except TypeError:
+                # We get `TypeError` if `manual_datast` is `None`
+                dataset, head, _ = self._create_dataset(ndim=data.ndim, chunks=data.shape)
+            self._manual_dataset[2] = data.shape
+        else:
+            try:
+                dataset, head, _ = self._datasets[index]
+            except (IndexError, TypeError):
+                # We will get an IndexError if index indicated a hogher number dataset than what already exists,
+                # but if we have a sparse creation of sets, e.g. set 0 is missing, but set 1 exists, we will get
+                # a type error since `None` is not iterable
+                dataset, head, _ = self._create_dataset(ndim=data.ndim, chunks=data.shape, index=index)
+            self._datasets[index][2] = data.shape
 
         for idx in range(data.ndim):
-            ax = self.head.size - data.ndim + idx
-            if self.head[ax] + data.shape[idx] > self.dataset.shape[ax]:
-                self.dataset.resize(self.head[ax] + data.shape[idx], axis=ax)
-
-        # if any(self.head[-data.ndim:] + data.shape > self.dataset.shape[-data.ndim:]):
-        #     # We need to resize
-        #     # TODO: This could possibly be optimized to rezise less frequent for the last axis
-        #     new_shape = np.array(self.dataset.shape)
-        #     new_shape[-data.ndim:] = self.head[-data.ndim:] + data.shape
-        #     # self.dataset.resize(new_length, axis=self.dataset.ndim - 1)
-        #     self.dataset.resize(new_shape)
+            ax = head.size - data.ndim + idx
+            if head[ax] + data.shape[idx] > dataset.shape[ax]:
+                dataset.resize(head[ax] + data.shape[idx], axis=ax)
 
         # All indices exept the last ndim number are constant
-        idx_list = list(self.head[:-data.ndim])
-        # The last couple indices should be sliced from head to head+data.shape
-        idx_list.extend([slice(start, start + length) for start, length in zip(self.head[-data.ndim:], data.shape)])
+        idx_list = list(head[:-data.ndim])
+        # The last indices should be sliced from head to head+data.shape
+        idx_list.extend([slice(start, start + length) for start, length in zip(head[-data.ndim:], data.shape)])
         # The list must be converted to a tuple
-        self.dataset[tuple(idx_list)] = data
+        dataset[tuple(idx_list)] = data
         # Uptade the head
-        # self.head = np.array(idx_list[:-data.ndim].extend([s.stop for s in idx_list[-data.ndim:]]))
-        self.head[-1] += data.shape[-1]
+        head[-1] += data.shape[-1]
 
-    def step(self, axis=-1):
-        # if axis < 0:
-        #    axis = self.dataset.ndim + axis
+    def step(self, **kwargs):
+        self._internal_Q.put(('step', kwargs))
+
+    def _step(self, axis=True, index=None):
+        if index is None:
+            try:
+                dataset, head, data_shape = self._manual_dataset
+            except TypeError:
+                # TODO: This happens if someone tries to step before datasets are created
+                return
+        else:
+            try:
+                dataset, head, data_shape = self._datasets[index]
+            except TypeError:
+                # TODO: TypeError if someone tries to step before datasets are created
+                return
+
+        if isinstance(axis, bool):
+            axis = max(len(head) - len(data_shape) - 1, 0)
+        if axis < 0:
+            axis = len(head) + axis - 1
+        steps = (len(head) - len(data_shape)) * (1,) + data_shape
+        head[axis] += steps[axis]
+        head[axis + 1:] = 0
+        if axis < len(head) - len(data_shape) and head[axis] >= dataset.shape[axis]:
+            dataset.resize(head[axis] + 1, axis)
+
+        return
+        # Old implementation below
+        if isinstance(axis, bool):
+            # Leave the data dimentions intact, step along the next one
+            axis = -len(data_shape) - 1
         if axis >= 0:
             # We would like to always index from the rear since the dimentions align there
-            axis = axis - self.dataset.ndim
+            axis = axis - dataset.ndim
 
-        # self.head = np.array(self.head)
-        # data_shape = self.data_shape
-        # self.data_shape = None
-
-        if -axis <= len(self.data_shape):
+        if -axis <= len(data_shape):
             # Step along axis in data
             # Reshaping as a consequence of this cannot be done here since we allow a new data shape
-            self.head[axis] += self.data_shape[axis]
+            head[axis] += data_shape[axis]
         else:
             # Step along axis not existing in data, resize if we need to
-            self.head[axis] += 1
-            if self.head[axis] >= self.dataset.shape[axis]:
-                self.dataset.resize(self.head[axis] + 1, self.dataset.ndim + axis)
+            head[axis] += 1
+            if head[axis] >= dataset.shape[axis]:
+                dataset.resize(head[axis] + 1, dataset.ndim + axis)
         # Reset axes after step axis
         # Strange indexing needed for when axis=-1, since there is no -0 equivalent
-        self.head[self.head.size + axis + 1:] = 0
+        head[head.size + axis + 1:] = 0
         # self.head = head
 
-    def _old_step(self, order=0):
-        '''
-        Moves the head to start a new measurement section
-        'order' sets the number of additional dimentions that will be leaved by the step (default 0).
+    def _write_target(self):
+        def handle(item):
+            # TODO: Well, we need to handle the incomming items
+            if item is None:
+                raise StopIteration
+            else:
+                action = item[0]
+                args = item[1]
+            if action == 'write':
+                self._write(*args)
+            elif action == 'create':
+                dataset = self._create_dataset(**args)
+            elif action == 'step':
+                self._step(**args)
+            elif action == 'select':
+                self._select_group(**args)
 
-        Example for 2d data
-        order=0, the next chunk of data will be placed at [..., +shape[1], 0] relative to previous
-        order=1, the next chunk of data will be placed at [...,+1, 0, 0] relative to previous
-        Example for 3d data
-        order=0,  the next chunk of data will be placed at [..., +shape[2], 0, 0] relative to previous
-        order=1,  the next chunk of data will be placed at [..., +1, 0, 0, 0] relative to previous
+        self._file = h5py.File(self.filename, mode='a')
+        self._select_group()
+        # Main write loop
+        while True:
+            try:
+                handle(self._internal_Q.get(timeout=self._timeout))
+            except queue.Empty:
+                continue
+            except StopIteration:
+                break
+        self._file.close()
 
-        In other words, ndim(dataset) needs to be at least ndim(data)+order.
-        order>0 will preserve the length of the last ndim(data) axes.
-        '''
-        head = np.array(self.head)
-        data_shape = self.data_shape
-        if order == 0:
-            ndim = len(data_shape)
-            head[-ndim] += data_shape[0]
-        else:
-            ndim = len(data_shape) + order
-            head[-ndim] += 1
-        head[-(ndim - 1):] = 0
-        self.head = tuple(head)
+    def _auto_target(self):
+        # TODO: Create named 2D datasets for the Qs/devices
+        for idx, device in enumerate(self._devices):
+            name = getattr(device, 'label', getattr(device, 'name', 'dataset{}'.format(idx)))
+            self.create_dataset(name=name, ndim=2, index=idx)
+        while not self._stop_event.is_set():
+            for idx, Q in enumerate(self._input_Qs):
+                try:
+                    data = Q.get(timeout=self._timeout)
+                except queue.Empty:
+                    continue
+                self._internal_Q.put(('write', (data, idx)))
+        # Stop event have bel set, clear out any remaining stuff in th Q
+        for idx, Q in enumerate(self._input_Qs):
+            while True:
+                try:
+                    data = Q.get(timeout=self._timeout)
+                except queue.Empty:
+                    break
+                self._internal_Q.put(('write', (data, idx)))
 
-    def close(self):
-        if self.file.id:
-            self.file.close()
-
-    def __del__(self):
-        self.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.close()
+    def _signal_target(self):
+        # TODO: Create named 3D datasets for all Qs
+        for idx, device in enumerate(self._devices):
+            name = getattr(device, 'label', getattr(device, 'name', 'dataset{}'.format(idx)))
+            self.create_dataset(name=name, ndim=3, index=idx)
+        # TODO: Enable ndim configuration
+        while not self._stop_event.is_set():
+            if self._write_signal.wait(self._timeout):
+                self._write_signal.clear()
+                for Q in self._input_Qs:
+                    # We should acuire all the locks as fast a possible!
+                    Q.mutex.acquire()
+                for idx, Q in enumerate(self._input_Qs):
+                    for data in Q.queue:
+                        self._internal_Q.put(('write', (data, idx)))
+                    Q.queue.clear()
+                for Q in self._input_Qs:
+                    Q.mutex.release()
 
 
 class HDFReader:
