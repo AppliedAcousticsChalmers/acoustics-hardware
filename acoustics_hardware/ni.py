@@ -161,15 +161,13 @@ class NIDevice(core.Device):
         write_funciton = writer.write_many_sample
         self._task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION  # Needed to prevent issues with buffer overwrites and reuse
         write_funciton(np.zeros((self._task.out_stream.num_chans, 2*self.framesize)))  # Pre-fill the buffer with zeros, there needs to be something in the buffer when we start
+        timeout = 0.5 * self.framesize / self.fs
 
         def output_callback(task_handle, every_n_samples_event_type,
                             number_of_samples, callback_data):
-            if self.output_active.is_set():
-                try:
-                    data = self._hardware_output_Q.get_nowait()
-                except queue.Empty:
-                    data = np.zeros((self._task.out_stream.num_chans, number_of_samples))
-            else:
+            try:
+                data = self._hardware_output_Q.get(timeout=timeout)
+            except queue.Empty:
                 data = np.zeros((self._task.out_stream.num_chans, number_of_samples))
             sampsWritten = write_funciton(data)
             return 0

@@ -38,6 +38,7 @@ class AudioDevice(core.Device):
         num_output_ch = max(self.outputs, default=-1) + 1
         num_input_ch = max(self.inputs, default=-1) + 1
         self.silent_ch = [ch for ch in range(num_output_ch) if ch not in self.outputs]
+        self._hardware_output_timeout = 0.5 * self.framesize / self.fs
         if num_input_ch and num_output_ch:
             # in/out stream
             def callback(indata, outdata, frames, time, status):
@@ -64,13 +65,10 @@ class AudioDevice(core.Device):
         self._hardware_input_Q.put(indata.T[self.inputs].copy())  # Transpose before copy to actually reverse the memory layout
 
     def _output_callback(self, outdata):
-        if self.output_active.is_set():
-            try:
-                outdata[:, self.outputs] = self._hardware_output_Q.get_nowait().T
-                outdata[:, self.silent_ch] = 0
-            except queue.Empty:
-                outdata[:] = 0
-        else:
+        try:
+            outdata[:, self.outputs] = self._hardware_output_Q.get(timeout=self._hardware_output_timeout).T
+            outdata[:, self.silent_ch] = 0
+        except queue.Empty:
             outdata[:] = 0
 
     def add_input(self, idx):
