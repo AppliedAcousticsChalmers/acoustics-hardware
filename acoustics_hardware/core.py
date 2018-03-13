@@ -202,7 +202,7 @@ class Device:
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
-        self._hardware_output_Q = queue.Queue()
+        self._hardware_output_Q = queue.Queue(maxsize=25)
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
         self.__generator_stop_event = threading.Event()
@@ -295,12 +295,19 @@ class Device:
     def __generator_target(self):
         for generator in self.__generators:
             generator.setup()
+        use_prev_frame = False
         while not self.__generator_stop_event.is_set():
             if self.output_active.wait(timeout=self._generator_timeout):
                 try:
-                    self._hardware_output_Q.put(np.concatenate([generator() for generator in self.__generators]))
+                    if not use_prev_frame:
+                        frame = np.concatenate([generator() for generator in self.__generators])
                 except GeneratorStop:
                     self.output_active.clear()
+                    continue
+                try:
+                    self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
+                except queue.Full:
+                    use_prev_frame = True
 
 
 class Channel:
