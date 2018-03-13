@@ -11,7 +11,7 @@ class QGenerator(core.Generator):
         self.Q = queue.Queue()
         self.buffer = None
 
-    def __call__(self):
+    def frame(self):
         gen_frame = []
         samples_left = self._device.framesize
         if self.buffer is not None:
@@ -42,7 +42,7 @@ class ArbitrarySignalGenerator(core.Generator):
         self.kwargs = kwargs
         self.reset()
 
-    def __call__(self):
+    def frame(self):
         if self.repetitions_done >= self.repetitions:
             raise core.GeneratorStop('Finite number of repetitions reached')
         samples_left = self._device.framesize
@@ -122,7 +122,7 @@ class FunctionGenerator(core.Generator):
         self.shape = shape
         self.phase_offset = phase_offset
 
-    def __call__(self):
+    def frame(self):
         if self.repetitions_done >= self.repetitions:
             raise core.GeneratorStop('Finite number of repetitions reached')
         frame = self._function(self._phase_array + self._phase, **self.kwargs)
@@ -227,7 +227,7 @@ class NoiseGenerator(core.Generator):
         'autoregressive': _ar_reset
     }
 
-    def __call__(self):
+    def frame(self):
         return self._call_methods[self.method](self)
 
     def setup(self):

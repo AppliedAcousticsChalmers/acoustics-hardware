@@ -403,7 +403,10 @@ class Generator:
         self._device = None
 
     def __call__(self):
-        raise NotImplementedError('Generators must be callable. Implement `__call__` in {}'.format(self.__class__.__name__))
+        return np.atleast_2d(self.frame())
+
+    def frame(self):
+        raise NotImplementedError('Required method `frame` is not implemented in {}'.format(self.__class__.__name__))
 
     def reset(self):
         pass
