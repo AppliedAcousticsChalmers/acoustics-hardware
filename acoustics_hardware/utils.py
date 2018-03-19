@@ -1,7 +1,6 @@
 import numpy as np
-from scipy.signal import lfilter, butter
+from scipy.signal import lfilter
 import queue
-import threading
 
 
 def flush_Q(q):
@@ -10,39 +9,6 @@ def flush_Q(q):
             q.get(timeout=0.1)
         except queue.Empty:
             break
-
-def calibrate(device_handler, channel, frequency=1e3, rms=1):
-    # Remove the existing output Qs and replace with our own
-    old_Qs = device_handler.queue_handler.queues
-    Q = queue.Queue()
-    device_handler.queue_handler.queues = [Q]
-    # Measure for 5 seconds
-    timer = threading.Timer(interval=5, function=device_handler.trigger_handler.trigger.clear)
-    device_handler.trigger_handler.trigger.set()
-    timer.start()
-    timer.join()
-
-    # Extract all the data
-    data = []
-    while True:
-        try:
-            data.append(Q.get(block=False))
-        except queue.Empty:
-            break
-    data = np.array([block[channel] for block in data]).reshape(-1)
-    if device_handler.device.dtype != 'float64':
-        coeffs = device_handler.device.scaling_coeffs(channel)
-        assert len(coeffs) < 3
-        data = coeffs[0] + coeffs[1] * data
-    # Filter around the specified frequency
-    wn = frequency / device_handler.device.fs * 2 * np.array([0.8, 1.2])
-    lpf = butter(2, wn, btype='bandpass')
-    data_filtered = lfilter(lpf[0], lpf[1], data)
-    # Put the original Qs back
-    device_handler.queue_handler.queues = old_Qs
-    # Return the normalized rms value
-    RMS = (data_filtered**2).mean()**0.5
-    return RMS / rms
 
 
 class LevelDetector:

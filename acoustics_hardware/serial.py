@@ -2,8 +2,6 @@
 from serial import Serial
 import schunk
 
-from . import core
-
 
 def get_devices(name=None):
     from serial.tools.list_ports import comports

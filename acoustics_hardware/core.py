@@ -424,13 +424,3 @@ class Generator:
 
 class GeneratorStop(Exception):
         pass
-
-
-class Printer(Device):
-    def _hardware_run(self):
-        # print(dir(self))
-        while not self._hardware_stop_event.is_set():
-            try:
-                print(self._hardware_output_Q.get(timeout=1))
-            except queue.Empty:
-                continue
