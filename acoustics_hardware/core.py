@@ -102,13 +102,6 @@ class Device:
         '''
         self._hardware_stop_event.set()
 
-    def _hardware_reset(self):
-        '''
-        This method works in combination with `_hardware_setup` to put the hardware back to a state
-        where it can be started again.
-        '''
-        pass
-
     def flush(self):
         '''
         Used to flush all Qs so that processes can terminate.
@@ -147,12 +140,6 @@ class Device:
             # TODO: What should happen if the Q is not in the list?
             self.__Qs.remove(Q)
 
-    @property
-    def output_Q(self):
-        # TODO: Documentation
-        # This only exists to have consistent naming conventions (_hardware_input_Q, _hardware_output_Q) for subclassing
-        return self._hardware_output_Q
-
     def add_trigger(self, trigger):
         # TODO: Documentation
         if self.__main_thread.is_alive():
@@ -189,7 +176,6 @@ class Device:
         self.__main_stop_event.clear()
         self.__trigger_stop_event.clear()
         self.__q_stop_event.clear()
-        self._hardware_reset()
         self._hardware_stop_event.clear()
         for trigger in self.__triggers:
             trigger.reset()
