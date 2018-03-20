@@ -69,7 +69,7 @@ class Device:
     def calibrations(self):
         return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
 
-    def input_scaling(self, frame):
+    def _input_scaling(self, frame):
         return frame
 
     @property
@@ -234,7 +234,7 @@ class Device:
             except queue.Empty:
                 continue
             # Execute all triggering conditions
-            scaled_frame = self.input_scaling(this_frame)
+            scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
                 trig(scaled_frame)
             # Move the frame to the buffer
@@ -250,7 +250,7 @@ class Device:
                 this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 break
-            scaled_frame = self.input_scaling(this_frame)
+            scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
                 trig(scaled_frame)
             data_buffer.append(this_frame)
