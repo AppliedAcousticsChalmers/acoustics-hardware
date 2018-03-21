@@ -37,6 +37,7 @@ class Device:
         self.__generators = []
         self.__triggers = []
         self.__Qs = []
+        self.__distributors = []
 
         # self.__main_stop_event = multiprocessing.Event()
         self.__main_stop_event = threading.Event()
@@ -130,6 +131,25 @@ class Device:
             # TODO: What should happen if the Q is not in the list?
             self.__Qs.remove(Q)
 
+    def add_distributor(self, distributor):
+        if self.__main_thread.is_alive():
+            # TODO: Custom warning class
+            raise UserWarning('It is not possible to add distributors while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__distributors.append(distributor)
+            distributor.device = self
+
+    def remove_distributor(self, distributor):
+        if self.__main_thread.is_alive():
+            # TODO: Custom warning class
+            raise UserWarning('It is not possible to remove distributors while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self.__distributors.remove(distributor)
+            try:
+                distributor.remove(self)
+            except AttributeError:
+                distributor.device = None
+
     def add_trigger(self, trigger):
         # TODO: Documentation
         if self.__main_thread.is_alive():
@@ -196,6 +216,9 @@ class Device:
         hardware_thread.start()
         trigger_thread.start()
         q_thread.start()
+
+        for distributor in self.__distributors:
+            distributor.setup()
 
         self.__main_stop_event.wait()
 
@@ -416,3 +439,22 @@ class Generator:
 
 class GeneratorStop(Exception):
         pass
+
+
+class Distributor:
+    def __init__(self):
+        self.device = None
+
+    def reset(self):
+        pass
+
+    def setup(self):
+        pass
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, dev):
+        self._device = dev
