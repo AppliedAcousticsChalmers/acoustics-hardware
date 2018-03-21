@@ -3,20 +3,20 @@ import sounddevice as sd
 from . import core
 
 
-def get_devices(name=None):
-    if name is None:
-        return sd.query_devices()
-    else:
-        return sd.query_devices(name)['name']
-
-
 class AudioDevice(core.Device):
+    @staticmethod
+    def get_devices(name=None):
+        if name is None:
+            return sd.query_devices()
+        else:
+            return sd.query_devices(name)['name']
+
     def __init__(self, name=None, fs=None, framesize=None):
         core.Device.__init__(self)
         if name is None:
-            self.name = get_devices()[0]['name']
+            self.name = AudioDevice.get_devices()[0]['name']
         else:
-            self.name = get_devices(name)
+            self.name = AudioDevice.get_devices(name)
 
         if fs is None:
             self.fs = sd.query_devices(self.name)['default_samplerate']

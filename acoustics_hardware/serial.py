@@ -3,36 +3,31 @@ from serial import Serial
 import schunk
 
 
-def get_devices(name=None):
-    from serial.tools.list_ports import comports
-    devs = comports()
-
-    # No input given, return the list of all connected devices
-    if name is None:
-        return devs
-    # No name given, return first connected port
-    # This is probably never what you want, but we can do nothing about it here
-    if len(name) == 0:
-        return devs[0].device
-    # Try name as a port name
-    for dev in devs:
-        if dev.device.lower() == name.lower():
-            return dev.device
-    # Try name as a serial device name
-    for dev in devs:
-        if dev.description.lower().find(name.lower()) >= 0:
-            return dev.device
-    # TODO: Any smart way to check for instrument name?
-    # This would require us to open a connection for all devs and query for a identifier
-    # That's probably dengerous since we might send queries in the wrong format
-    # to devices that might respond and do something unspecified
-
-
 class SerialGenerator:  # (Thread):
+    @staticmethod
+    def get_devices(name=None):
+        from serial.tools.list_ports import comports
+        devs = comports()
+        # No input given, return the list of all connected devices
+        if name is None:
+            return devs
+        # No name given, return first connected port
+        # This is probably never what you want, but we can do nothing about it here
+        if len(name) == 0:
+            return devs[0].device
+        # Try name as a port name
+        for dev in devs:
+            if dev.device.lower() == name.lower():
+                return dev.device
+        # Try name as a serial device name
+        for dev in devs:
+            if dev.description.lower().find(name.lower()) >= 0:
+                return dev.device
+
     def __init__(self, name, frequency=1e3, amplitude=1, output_unit='rms', shape='sine',
                  sweeps=0, sweep_time=1, sweep_start=100, sweep_stop=1e3, sweep_spacing='log'):
         # Thread.__init__(self)
-        self.device = get_devices(name)
+        self.device = SerialGenerator.get_devices(name)
         self.ser = Serial(port=self.device, timeout=1, dsrdtr=True)
         self._write('system:remote', 'output:load inf')
         self.output_unit = output_unit

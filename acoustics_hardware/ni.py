@@ -10,26 +10,26 @@ import nidaqmx.stream_writers
 logger = logging.getLogger(__name__)
 
 
-def get_devices(name=None):
-    system = nidaqmx.system.System.local()
-    name_list = [dev.name for dev in system.devices]
-    if name is None:
-        return name_list
-    else:
-        if len(name) == 0:
-            name = name_list[0]
-        if name[:4] == 'cDAQ' and name[5:8] != 'Mod':
-            name = [x for x in name_list if x[:8] == name[:5] + 'Mod'][0]
-        return name
-
-
 class NIDevice(core.Device):
     # TODO: Implement output devices. Caveat: We would need an output device to test the implementation...
+    @staticmethod
+    def get_devices(name=None):
+        system = nidaqmx.system.System.local()
+        name_list = [dev.name for dev in system.devices]
+        if name is None:
+            return name_list
+        else:
+            if len(name) == 0:
+                name = name_list[0]
+            if name[:4] == 'cDAQ' and name[5:8] != 'Mod':
+                name = [x for x in name_list if x[:8] == name[:5] + 'Mod'][0]
+            return name
+
     def __init__(self, name=None, fs=None, framesize=10000, dtype='float64'):
         core.Device.__init__(self)
         if name is None:
-            name = get_devices()[0]
-        self.name = get_devices(name)
+            name = NIDevice.get_devices()[0]
+        self.name = NIDevice.get_devices(name)
         if fs is None:
             try:
                 self.fs = nidaqmx.system.Device(self.name).ai_max_single_chan_rate
