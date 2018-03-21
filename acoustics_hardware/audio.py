@@ -71,14 +71,6 @@ class AudioDevice(core.Device):
         except queue.Empty:
             outdata[:] = 0
 
-    def add_input(self, idx):
-        if idx not in self.inputs and idx < self.max_inputs:
-            self.inputs.append(idx)
-
-    def add_output(self, idx):
-        if idx not in self.outputs and idx < self.max_outputs:
-            self.outputs.append(idx)
-
     @property
     def max_inputs(self):
         return sd.query_devices(self.name)['max_input_channels']
