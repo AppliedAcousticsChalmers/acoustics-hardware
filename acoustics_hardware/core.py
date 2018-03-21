@@ -112,18 +112,18 @@ class Device:
         channel.calibration = detector.current_level / value
         channel.unit = unit
 
-    @property
-    def input_Q(self):
+    def _register_input_Q(self, Q=None):
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
             # Q = multiprocessing.Queue()
-            Q = queue.Queue()
+            if Q is None:
+                Q = queue.Queue()
             self.__Qs.append(Q)
             return Q
 
-    def remove_Q(self, Q):
+    def _unregister_input_Q(self, Q):
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
