@@ -3,17 +3,38 @@ import numpy as np
 import logging
 from . import core
 
-import nidaqmx
-import nidaqmx.stream_readers
-import nidaqmx.stream_writers
+try:
+    import nidaqmx
+    import nidaqmx.stream_readers
+    import nidaqmx.stream_writers
+except ModuleNotFoundError:
+    pass
 
 logger = logging.getLogger(__name__)
 
 
 class NIDevice(core.Device):
-    # TODO: Implement output devices. Caveat: We would need an output device to test the implementation...
+    """Class for interacting with national instruments hardware.
+
+    Implementation of the `~core.Device` framework for national instruments hardware.
+    Built on top of the `nidaqmx <https://nidaqmx-python.readthedocs.io/>`_ package.
+
+    See Also:
+        `acoustics_hardware.core.Device`.
+    """
     @staticmethod
     def get_devices(name=None):
+        """Check which NI hardware is available.
+
+        Since `NIDevice` is intended to interact with a single module at the
+        time, this will complete names by selecting the first available module
+        is a chassi.
+
+        Arguments:
+            name (`str`, optional): incomplete name of device or ``None``
+        Returns:
+            Complete name of device, or list of all devices.
+        """
         system = nidaqmx.system.System.local()
         name_list = [dev.name for dev in system.devices]
         if name is None:
@@ -54,16 +75,29 @@ class NIDevice(core.Device):
 
     @property
     def input_range(self):
-        '''
-        This is only an approximate value, do NOT use for calibrating unscaled readings
-        '''
+        """Returns the input range on the device.
+
+        Note:
+            This is only an approximate value, do NOT use for calibrating
+            unscaled readings.
+        """
         return nidaqmx.system.Device(self.name).ai_voltage_rngs
 
     @property
     def output_range(self):
+        """Returns the output range on the device.
+
+        Note:
+            This is only an approximate value, do NOT use for calibrating
+            unscaled outputs.
+        """
         return nidaqmx.system.Device(self.name).ao_voltage_rngs
 
     def bit_depth(self, channel=None):
+        """The bitdepth for the device.
+
+        Currently only implemented for input devices.
+        """
         # TODO: This can only be called from the device process, otherwise the task is not available
         if channel is None:
             # TODO: What would be the expected behavior if the channels have different depths??
@@ -73,6 +107,11 @@ class NIDevice(core.Device):
         return self._task.ai_channels[ch_idx].ai_resolution
 
     def word_length(self, channel=None):
+        """The word length for the device.
+
+        Only valid when using raw, unscaled, data types.
+        Currently only implemented for input devices.
+        """
         # TODO: This can only be called from the device process, otherwise the task is not available
         if channel is None:
             return max([ch.ai_raw_samp_size for ch in self._task.ai_channels])
@@ -81,10 +120,11 @@ class NIDevice(core.Device):
             return self._task.ai_channels[ch_idx].ai_raw_samp_size
 
     def scaling_coeffs(self, channels=None):
-        '''
+        """Scaling coefficients used while reading raw input.
+
         Returns the polynomial coefficients required to calculate
-        input voltage from unscaled integers
-        '''
+        input voltage from unscaled integers.
+        """
         # TODO: This can only be called from the device process, otherwise the task is not available
         if channels is None:
             channels = self.inputs
