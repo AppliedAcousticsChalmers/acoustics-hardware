@@ -92,16 +92,6 @@ class Device:
         '''
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
 
-    def _hardware_stop(self):
-        '''
-        This is the primary method used for stopping the hardware.
-        It is reccomended to do this using Events inside the _hardware_run method.
-
-        Default implementation:
-            self._hardware_stop_event.set()
-        '''
-        self._hardware_stop_event.set()
-
     def flush(self):
         '''
         Used to flush all Qs so that processes can terminate.
@@ -211,7 +201,7 @@ class Device:
 
         self.__generator_stop_event.set()
         generator_thread.join()
-        self._hardware_stop()
+        self._hardware_stop_event.set()
         hardware_thread.join()
         self.__trigger_stop_event.set()
         trigger_thread.join()
