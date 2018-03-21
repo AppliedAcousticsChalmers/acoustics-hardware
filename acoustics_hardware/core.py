@@ -8,16 +8,23 @@ import json
 
 
 class Device:
-    """
-    Top level abstract Device class used for inheritance to implement specific hardware.
-    Required methods to implement:
-    - `_hardware_run`: Main method used to run the hardware
+    """Abstract class that provides a consistent framework for different hardware.
 
-    Optional methods to override:
-    - `_hardware_stop`: Use to stop the hardware
-    - `_hardware_reset`: Use to reset the hardware/python object to a startable state
+    An instance of a specific implementation of of `Device` is typically linked
+    to a single physical input/output device. The instance manages connections to
+    the device, any attached triggers, enabling/disabling input/output, and
+    attached generators.
 
-    See the documentation of these for more information.
+    Attributes:
+        input_active (`~threading.Event`): Controls input state.
+            Use `~threading.Event.set` to activate input and `~threading.Event.clear` to deactivate.
+        output_active (`~threading.Event`): Controls output state.
+            Use `~threading.Event.set` to activate output and `~threading.Event.clear` to deactivate.
+        inputs (list[`Channel`]): List of assigned inputs, see `add_input`.
+        outputs (list[`Channel`]): List of assigned outputs, see `add_output`.
+        max_inputs (`int`): The maximum number of inputs available.
+        max_outputs (`int`): The maximum number of outputs available.
+        calibrations (`numpy.ndarray`): Calibrations of input channels, defaults to 1 for missing calibrations.
 
     """
     _generator_timeout = 1
@@ -45,24 +52,52 @@ class Device:
         self.__main_thread = threading.Thread()
 
     def start(self):
-        # TODO: Documentation
+        """Starts the device.
+
+        This creates the connections between the hardware and the software,
+        configures the hardware, and initializes triggers and generators.
+        Triggers are activated unless manually deactivated beforehand.
+        Generators will not start generating data until the output is activated.
+
+        Note:
+            This does NOT activate inputs or outputs!
+        """
         # self.__main_thread = multiprocessing.Process(target=self._Device__main_target)
         self.__main_thread = threading.Thread(target=self._Device__main_target)
 
         self.__main_thread.start()
 
     def stop(self):
-        # TODO: Documentation
+        """Stops the device.
+
+        Use this to turn off or disconnect a device safely after a measurement.
+        It is not recommended to use this as deactivation control, i.e. you should
+        normally not have to make multiple calls to this function.
+
+        """
         self.__main_stop_event.set()
         # self.__process.join(timeout=10)
         # TODO: We will not wait for the process now, since it will not finish if there are
         # items left in the Q.
 
     def add_input(self, index, **kwargs):
+        """Adds a new input `Channel`.
+
+        Arguments:
+            index (`int`): Zero-based index of the channel.
+            **kwargs: All arguments of `Channel` except ``chtype`` and ``index``.
+
+        """
         if index not in self.inputs and index < self.max_inputs:
             self.inputs.append(Channel(index, 'input', **kwargs))
 
     def add_output(self, index, **kwargs):
+        """Adds a new output `Channel`.
+
+        Arguments:
+            index (`int`): Zero-based index of the channel.
+            **kwargs: All arguments of `Channel` except ``chtype`` and ``index``.
+        """
         if index not in self.outpts and index < self.max_outputs:
             self.outputs.append(Channel(index, 'output', **kwargs))
 
@@ -71,6 +106,17 @@ class Device:
         return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
 
     def _input_scaling(self, frame):
+        """Scales the input for triggering
+
+        This is separate from applying calibration values, which is controlled
+        by each trigger. The intention here is to account for data formats,
+        e.g. reading data as int32 instead of floats or removing DC offsets.
+
+        Arguments:
+            frame (`numpy.ndarray`): Unscaled input frame.
+        Returns:
+            `numpy.ndarray`: Scaled input frame
+        """
         return frame
 
     @property
@@ -82,33 +128,81 @@ class Device:
         return np.inf
 
     def _hardware_run(self):
-        '''
-        This is the primary method in which hardware interfacing should be implemented.
-        There are two Qs, two required events, and two default controll events.
-            `_hardware_input_Q`: The Q where read input data should go
-            `_hardware_output_Q`: The Q where the output data to write is stored
-            `input_active`: The event which toggles if data should be placed in the input Q
-            `output_active`; The event whoch toggles if data should be read from the output Q
-            `_hardware_stop_event`: Tells the hardware thread to stop, see `_hardware_stop` and `_hardware_reset`
-        '''
+        """This is the primary method in which hardware interfacing should be implemented.
+
+        This method will run in a separate thread. It is responsible for creating the
+        connections to the hardware according to the configurations.
+        If the device has registered inputs, they should always be read and frames
+        should be put in the input Q (in the order registered).
+        If the device has registered outputs, frames should be taken from the output Q
+        and and output through the physical channels (in the order registered).
+        If a specific hardware requires constant data streams, fill the stream
+        with zeros if no output data is available. The timings for this must be
+        implemented by this method.
+
+        This method is responsible for checking if the stop event is set with the interval
+        specified by the hardware timeout attribute. When this thread receives the signal
+        to stop, it must close all connections to the device and reset it to a state from
+        where it can be started again (possibly from another instance).
+
+        Attributes:
+            _hardware_input_Q (`~queue.Queue`): The Q where read input data should go.
+            _hardware_output_Q (`~queue.Queue`): The Q where the output data to write is stored.
+            _hardware_stop_event (`~threading.Event`): Tells the hardware thread to stop.
+            _hardware_timeout (`float`): How often the stop event should be checked.
+        """
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
 
     def flush(self):
-        '''
-        Used to flush all Qs so that processes can terminate.
-        THIS WILL DELETE DATA which is still in the Qs
-        '''
+        """Used to flush all Qs.
+
+        This can be useful if a measurement needs to be discarded.
+        Data that have been removed from the queues, e.g. automatic file writers,
+        will not be interfered with.
+
+        Note:
+            This will delete data which is still in the queues!
+        """
         for q in self.__Qs:
             utils.flush_Q(q)
 
     def input_data(self):
+        """Collects the acquired input data.
+
+        Data in stored internally in the `Device` object while input is active.
+        This method is a convenient way to access the data from a measurement
+        when more elaborate and automated setups are not required.
+
+        Returns:
+            `numpy.ndarray`: Array with the input data.
+            Has the shape (n_inputs, n_samples), and the input channels are
+            ordered in the same order as they were added.
+        """
         if self.input_active.is_set():
             print('It is not safe to get all data while input is active!')
         else:
             return utils.concatenate_Q(self.__internal_input_Q)
 
     def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
+        """Calibrates a channel using a reference signal.
+
+        The resulting calibration value and unit is stored as attributes of the
+        corresponding `Channel`. Different calibration types should be used for different
+        instruments.
+        Currently only unfiltered RMS calibrations are implemented. This detects the level
+        in the signal for 3 seconds, and uses the final level as the calibration value.
+
+        Arguments:
+            channel (`int`): Index of the channel, in the order that they were added to the device.
+            frequency (`float`): The frequency of the applied reference signal, defaults to 1 kHz.
+            value (`float`): The value of the reference signal, defaults to 1.
+            ctype (``'rms'``): Use to switch between different calibration methods. Currently not used.
+            unit (`str`): The unit of the calibrated quantity, defaults to ``'V'``.
+
+        """
         # TODO: Is this a good value for the time_constant?
+        # TODO: Pre-filters
+        # TODO: Average over the whole sequence
         detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
         timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
         self.__triggers.append(detector)
@@ -119,6 +213,24 @@ class Device:
         channel.unit = unit
 
     def _register_input_Q(self, Q=None):
+        """Registers new input Q.
+
+        This should be used to register a queue used by a `Distributor`. The
+        queue will receive frames read while the input is active.
+        For memory efficiency the input frames are not copied to individual
+        queues, so in-place operations are not safe. If a `Distributor` needs
+        to manipulate the data a copy should be made before manipulation.
+
+        Arguments:
+            Q (`~queue.Queue`, optional): The Q to register. Will be created if equal to `None`
+        Returns:
+            `~queue.Queue`: The registered Q.
+        Note:
+            The frames are NOT copied to multiple queues!
+        See Also:
+            `_unregister_input_Q`
+
+        """
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
@@ -130,6 +242,17 @@ class Device:
             return Q
 
     def _unregister_input_Q(self, Q):
+        """Unregisters input Q.
+
+        Removes a queue from the list of queues that receive input data.
+        This method should be used by a `Distributor` if it is removed from
+        the `Device`.
+
+        Arguments:
+            Q (`~queue.Queue`): The Q to remove.
+        See Also:
+            `_register_input_Q`
+        """
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
@@ -138,6 +261,13 @@ class Device:
             self.__Qs.remove(Q)
 
     def add_distributor(self, distributor):
+        """Adds a `Distributor` to the `Device`.
+
+        Arguments:
+            distributor (`Distributor`): The distributor to add.
+        See Also:
+            `Distributor`, `remove_distributor`
+        """
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to add distributors while the device is running. Stop the device and perform all setup before starting.')
@@ -146,6 +276,13 @@ class Device:
             distributor.device = self
 
     def remove_distributor(self, distributor):
+        """Removes a `Distributor` from the `Device`.
+
+        Arguments:
+            distributor (`Distributor`): The distributor to remove.
+        See Also:
+            `Distributor`, `add_distributor`
+        """
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
             raise UserWarning('It is not possible to remove distributors while the device is running. Stop the device and perform all setup before starting.')
@@ -157,6 +294,13 @@ class Device:
                 distributor.device = None
 
     def add_trigger(self, trigger):
+        """Adds a `Trigger` to the `Device`.
+
+        Arguments:
+            trigger (`Trigger`): The trigger to add.
+        See Also:
+            `Trigger`, `remove_trigger`
+        """
         # TODO: Documentation
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
@@ -166,6 +310,13 @@ class Device:
             trigger.device = self
 
     def remove_trigger(self, trigger):
+        """Removes a `Trigger` from the `Device`.
+
+        Arguments:
+            trigger (`Trigger`): The trigger to remove.
+        See Also:
+            `Trigger`, `add_trigger`
+        """
         # TODO: Documentation
         if self.__main_thread.is_alive():
             # TODO: Custom warning class
@@ -175,6 +326,18 @@ class Device:
             trigger.device = None
 
     def add_generator(self, generator):
+        """Adds a `Generator` to the `Device`.
+
+        Arguments:
+            generator (`Generator`): The generator to add.
+        See Also:
+            `Generator`, `remove_generator`
+        Note:
+            The order that multiple generators are added to a device
+            dictates which output channel receives data from which generator.
+            The total number of generated channels must match the number of
+            output channels.
+        """
         if self.__main_thread.is_alive():
             raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
         else:
@@ -182,6 +345,13 @@ class Device:
             generator.device = self
 
     def remove_generator(self, generator):
+        """Removes a `Generator` from the `Device`.
+
+        Arguments:
+            generator (`Generator`): The generator to remove.
+        See Also:
+            `Generator`, `add_generator`
+        """
         if self.__main_thread.is_alive():
             raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
         else:
@@ -189,6 +359,17 @@ class Device:
             generator.device = None
 
     def __reset(self):
+        """Resets the `Device`.
+
+        Performs a number of tasks required to restart a device after it has
+        been stopped:
+
+        - Clears all stop events
+        - Resets all triggers
+        - Resets all generators
+        - Clears input and output activation
+
+        """
         self.__main_stop_event.clear()
         self.__trigger_stop_event.clear()
         self.__q_stop_event.clear()
@@ -201,6 +382,15 @@ class Device:
         self.output_active.clear()
 
     def _Device__main_target(self):
+        """Main method for a `Device`.
+
+        This is the method that is executed when the device is started.
+        Four other threads will be started in this method, one for generators,
+        one for triggers, one for queue handling, and one for the hardware.
+        This method is also responsible for creating most of the queues and
+        events that connect the other threads, as well as initializing the
+        distributors.
+        """
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
@@ -225,9 +415,6 @@ class Device:
         trigger_thread.start()
         q_thread.start()
 
-        for distributor in self.__distributors:
-            distributor.setup()
-
         self.__main_stop_event.wait()
 
         self.__generator_stop_event.set()
@@ -243,6 +430,11 @@ class Device:
         # the question is what we want to do about it?
 
     def __trigger_target(self):
+        """Trigger handling method.
+
+        This method will execute as a subthread in the device, responsible
+        for managing the attached triggers, and handling input data.
+        """
         # TODO: Get buffer size depending on pre-trigger value
         data_buffer = collections.deque(maxlen=10)
         for trigger in self.__triggers:
@@ -280,6 +472,15 @@ class Device:
                     self.__triggered_q.put(data_buffer.popleft())
 
     def __q_target(self):
+        """Queue handling method.
+
+        This method will execute as a subthread in the device, responsible
+        for moving data from the input (while active) to the queues used by
+        `Distributors`.
+        """
+        for distributor in self.__distributors:
+            distributor.setup()
+
         while not self.__q_stop_event.is_set():
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
@@ -300,6 +501,12 @@ class Device:
                 Q.put(this_frame)
 
     def __generator_target(self):
+        """Generator handling method.
+
+        This method will execute as a subthread in the device, responsible
+        for managing attached generators, and generating output frames from
+        the generators.
+        """
         for generator in self.__generators:
             generator.setup()
         use_prev_frame = False
@@ -318,9 +525,40 @@ class Device:
 
 
 class Channel:
+    """Represents a channel of a device.
+
+    Contains information about a physical channel used.
+
+    Arguments:
+        index (int): Zero-based index of the channel in the device.
+        chtype (``'input'`` or ``'output'``): Type of channel.
+        label (str, optional): User label for identification of the channel.
+        calibration (float, optional): Manual calibration value.
+        unit (str, optional): Physical unit of the calibrated channel.
+    """
     @classmethod
     def from_json(cls, json_dict):
+        """Creates a channel from json representation.
+
+        Arguments:
+            json_dict (str): json representation of a dictionary containing
+                key-value pairs for the arguments of a `Channel`.
+        Returns:
+            `Channel`: A channel with the given specification.
+        See Also:
+            `Channel.to_json`
+        """
         return cls(**json.loads(json_dict))
+
+    def to_json(self):
+        """Create json representation of this channel.
+
+        Returns:
+            str: json representation.
+        See Also:
+            `Channel.from_json`.
+        """
+        return json.dumps(self.__dict__)
 
     def __init__(self, index, chtype, label=None, calibration=None, unit=None):
         self.index = index
@@ -347,19 +585,41 @@ class Channel:
         calib_str = '' if self.calibration is None else ' ({:.4g} {})'.format(self.calibration, self.unit)
         return '{chtype} channel {index}{label}{calib}'.format(chtype=self.chtype, index=self.index, label=label_str, calib=calib_str).capitalize()
 
-    def to_json(self):
-        return json.dumps(self.__dict__)
-
 
 class Trigger:
-    # TODO: Documentation
-    def __init__(self, action=None, false_action=None, auto_deactivate=True):
+    """Base class for Trigger implementation.
+
+    A `Trigger` is an object that performs a test on all input data from a
+    `Device`, regardless if the input is set as active or not. If the test
+    evaluates to ``True`` the trigger will perform a set of actions,
+    e.g. activate the input of a `Device`.
+
+    Arguments:
+        action (callable or list of callables): Initial list of ``actions``.
+        false_action (callable or list of callables): Initial list of ``false_actions``.
+        auto_deactivate (`bool`): Initial setting for ``auto_deactivate``, default ``True``.
+        use_calibrations (`bool`): Initial setting for ``use_calibrations``, default ``True``.
+    Attributes:
+        active (`~threading.Event`): Controls if the trigger is active or not.
+            A deactivated trigger will still test (e.g. to track levels), but
+            not take action. Triggers start of as active unless manually deactivated.
+        actions (list of callables): The actions that will be
+            called each time the test evaluates to ``True``.
+        false_actions (list of callables): The actions that will be
+            called each time the test evaluates to ``False``.
+        auto_deactivate (`bool`): Sets if the trigger deactivates itself when
+            the test is ``True``. Useful to only trigger once.
+        use_calibrations (`bool`): Sets if calibration values from the `Device`
+            should be used for the test.
+    """
+    def __init__(self, action=None, false_action=None, auto_deactivate=True, use_calibrations=True):
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
         self.active.set()
 
         self.actions = []
         self.auto_deactivate = auto_deactivate
+        self.use_calibrations = use_calibrations
         if action is not None:
             try:
                 self.actions.extend(action)
@@ -373,11 +633,11 @@ class Trigger:
             except TypeError:
                 self.false_actions.append(false_action)
         self.device = None
-        self.use_calibrations = False
 
     def __call__(self, frame):
+        """Manages testing and actions."""
         # We need to perform the test event if the triggering is disabled
-        # Some triggers (RMSTrigger) needs to update their state continiously to work as intended
+        # Some triggers (RMSTrigger) needs to update their state continuously to work as intended
         # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
         # start form zero
         test = self.test(frame * self.calibrations)
@@ -389,12 +649,23 @@ class Trigger:
                 [action() for action in self.false_actions]
 
     def test(self, frame):
+        """Performs test.
+
+        The trigger conditions should be implemented here.
+
+        Arguments:
+            frame (`numpy.ndarray`): The current input frame to test.
+        Returns:
+            `bool`: ``True`` -> do ``actions``, ``False`` -> do ``false_actions``
+        """
         raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
 
     def reset(self):
+        """Resets the trigger state."""
         self.active.set()
 
     def setup(self):
+        """Configures trigger state."""
         if self.use_calibrations:
             self.calibrations = self.device.calibrations
         else:
@@ -421,19 +692,36 @@ class Trigger:
 
 
 class Generator:
+    """Base class for generator implementations.
+
+    A `Generator` is an object that creates data for output channels in a
+    `Device`. Refer to specific generators for more details.
+    """
     def __init__(self):
         self.device = None
 
     def __call__(self):
+        """Manages frame creation"""
         return np.atleast_2d(self.frame())
 
     def frame(self):
+        """Generates a frame of output.
+
+        The generated frame must match the device framesize.
+        If the generator creates multiple channels, it should have the shape
+        ``(n_ch, framesize)``, otherwise 1d arrays are sufficient.
+
+        Returns:
+            `numpy.ndarray`: Generated frame.
+        """
         raise NotImplementedError('Required method `frame` is not implemented in {}'.format(self.__class__.__name__))
 
     def reset(self):
+        """Resets the generator."""
         pass
 
     def setup(self):
+        """Configures the generator state."""
         pass
 
     @property
@@ -446,17 +734,30 @@ class Generator:
 
 
 class GeneratorStop(Exception):
-        pass
+    """Raised by `Generators`.
+
+    This exception indicates that the generator have reached some stopping
+    criteria, e.g. end of file. Should be caught by the `Device` to stop output.
+    """
+    pass
 
 
 class Distributor:
+    """Base class for Distributors.
+
+    A `Distributor` is an object that should receive the input data from a
+    `Device`, e.g. a plotter or a file writer. Refer to specific implementations
+    for more details.
+    """
     def __init__(self):
         self.device = None
 
     def reset(self):
+        """Resets the distributor"""
         pass
 
     def setup(self):
+        """Configures the distributor state"""
         pass
 
     @property
