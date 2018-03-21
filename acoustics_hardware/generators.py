@@ -13,13 +13,13 @@ class QGenerator(core.Generator):
 
     def frame(self):
         gen_frame = []
-        samples_left = self._device.framesize
+        samples_left = self.device.framesize
         if self.buffer is not None:
             gen_frame.append(self.buffer[..., :samples_left])
             samples_left -= gen_frame[-1].shape[-1]
         while samples_left > 0:
             try:
-                frame = self.Q.get(timeout=self._device._generator_timeout)
+                frame = self.Q.get(timeout=self.device._generator_timeout)
             except queue.Empty:
                 raise core.GeneratorStop('Input Q is empty')
             gen_frame.append(frame[..., :samples_left])
@@ -45,7 +45,7 @@ class ArbitrarySignalGenerator(core.Generator):
     def frame(self):
         if self.repetitions_done >= self.repetitions:
             raise core.GeneratorStop('Finite number of repetitions reached')
-        samples_left = self._device.framesize
+        samples_left = self.device.framesize
         gen_frame = []
         while samples_left > 0:
             gen_frame.append(self.signal[..., self.idx:self.idx + samples_left])
@@ -69,7 +69,7 @@ class ArbitrarySignalGenerator(core.Generator):
     def setup(self):
         """
         Implements signal creation. Create one cycle of the signal and store it
-        in `self.signal`. Access the underlying device as `self._device`, which has
+        in `self.signal`. Access the underlying device as `self.device`, which has
         important properties, e.g. samplerate `fs`.
         """
         core.Generator.setup(self)
@@ -88,7 +88,7 @@ class SweepGenerator(ArbitrarySignalGenerator):
 
     def setup(self):
         ArbitrarySignalGenerator.setup(self)
-        time_vector = np.arange(round(self.duration * self._device.fs)) / self._device.fs
+        time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
         self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
         if self.bidirectional:
             self.signal = np.concatenate([self.signal, self.signal[::-1]])
@@ -129,16 +129,16 @@ class FunctionGenerator(core.Generator):
         self._phase += self._phase_per_frame
         if self.repetitions_done >= self.repetitions:
             surplus_reps = self.repetitions_done - self.repetitions
-            surplus_samps = round(surplus_reps * self._device.fs / self.frequency)
+            surplus_samps = round(surplus_reps * self.device.fs / self.frequency)
             frame[-surplus_samps:] = 0
         return self.amplitude * frame
 
     def setup(self):
         core.Generator.setup(self)
         self.reset()
-        taps = np.arange(self._device.framesize)
-        self._phase_array = 2 * np.pi * taps * self.frequency / self._device.fs
-        self._phase_per_frame = 2 * np.pi * self.frequency / self._device.fs * self._device.framesize
+        taps = np.arange(self.device.framesize)
+        self._phase_array = 2 * np.pi * taps * self.frequency / self.device.fs
+        self._phase_per_frame = 2 * np.pi * self.frequency / self.device.fs * self.device.framesize
 
     def reset(self):
         core.Generator.reset(self)
@@ -177,13 +177,13 @@ class NoiseGenerator(core.Generator):
         self.method_args = kwargs
 
     def _fft_noise(self):
-        normal = np.random.normal(size=self._device.framesize)
+        normal = np.random.normal(size=self.device.framesize)
         shaped = ifft(self._spectral_coefficients * fft(normal))
         # TODO: Normalization, variable amplitude, soft clipping?
         return shaped
 
     def _fft_setup(self):
-        bins = np.arange(self._device.framesize // 2 + 1)  # We are using single sided spectrum
+        bins = np.arange(self.device.framesize // 2 + 1)  # We are using single sided spectrum
         bins[0] = 1  # Do not modify DC bin
         self._spectral_coefficients = bins.astype('double')**(-self.power / 2)
 
@@ -191,9 +191,9 @@ class NoiseGenerator(core.Generator):
         del self._spectral_coefficients
 
     def _ar_noise(self):
-        normal = np.random.normal(size=self._device.framesize)
-        shaped = np.zeros(shape=self._device.framesize)
-        for idx in range(self._device.framesize):
+        normal = np.random.normal(size=self.device.framesize)
+        shaped = np.zeros(shape=self.device.framesize)
+        for idx in range(self.device.framesize):
             shaped[idx] = normal[idx] - (self._ar_coefficients * self._ar_buffer).sum()
             self._ar_buffer = np.roll(self._ar_buffer, 1)
             self._ar_buffer[0] = shaped[idx]

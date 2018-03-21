@@ -137,7 +137,7 @@ class Device:
             raise UserWarning('It is not possible to add new triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.append(trigger)
-            trigger._device = self
+            trigger.device = self
 
     def remove_trigger(self, trigger):
         # TODO: Documentation
@@ -146,21 +146,21 @@ class Device:
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.remove(trigger)
-            trigger._device = None
+            trigger.device = None
 
     def add_generator(self, generator):
         if self.__main_thread.is_alive():
             raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__generators.append(generator)
-            generator._device = self
+            generator.device = self
 
     def remove_generator(self, generator):
         if self.__main_thread.is_alive():
             raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__generators.remove(generator)
-            generator._device = None
+            generator.device = None
 
     def __reset(self):
         self.__main_stop_event.clear()
@@ -341,7 +341,7 @@ class Trigger:
                 self.false_actions.extend(false_action)
             except TypeError:
                 self.false_actions.append(false_action)
-        self._device = None
+        self.device = None
         self.use_calibrations = False
 
     def __call__(self, frame):
@@ -365,9 +365,9 @@ class Trigger:
 
     def setup(self):
         if self.use_calibrations:
-            self.calibrations = self._device.calibrations
+            self.calibrations = self.device.calibrations
         else:
-            self.calibrations = np.ones(len(self._device.inputs))
+            self.calibrations = np.ones(len(self.device.inputs))
 
     @property
     def auto_deactivate(self):
@@ -380,10 +380,18 @@ class Trigger:
         elif self.auto_deactivate and not value:
             self.actions.remove(self.active.clear)
 
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, dev):
+        self._device = dev
+
 
 class Generator:
     def __init__(self):
-        self._device = None
+        self.device = None
 
     def __call__(self):
         return np.atleast_2d(self.frame())
@@ -396,6 +404,14 @@ class Generator:
 
     def setup(self):
         pass
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, dev):
+        self._device = dev
 
 
 class GeneratorStop(Exception):
