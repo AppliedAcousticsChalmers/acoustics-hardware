@@ -4,8 +4,23 @@ from . import core
 
 
 class AudioDevice(core.Device):
+    """Class for interacting with audio interfaces.
+
+    Implementation of the `~core.Device` framework for audio interfaces.
+    Built on top of the `sounddevice <http://python-sounddevice.readthedocs.io/>`_ package.
+
+    See Also:
+        `acoustics_hardware.core.Device`.
+    """
     @staticmethod
     def get_devices(name=None):
+        """Check which audio interfaces can be interacted with
+
+        Arguments:
+            name (`str`, optional): incomplete name of device or ``None``
+        Returns:
+            Complete name of device, or list of all devices.
+        """
         if name is None:
             return sd.query_devices()
         else:
