@@ -101,7 +101,13 @@ class Device:
         for q in self.__Qs:
             utils.flush_Q(q)
 
-    def calibrate(self, channel, frequency=1e3, value=1, type='rms', unit='V'):
+    def input_data(self):
+        if self.input_active.is_set():
+            print('It is not safe to get all data while input is active!')
+        else:
+            return utils.concatenate_Q(self.__internal_input_Q)
+
+    def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
         # TODO: Is this a good value for the time_constant?
         detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
         timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
@@ -201,6 +207,8 @@ class Device:
         self._hardware_output_Q = queue.Queue(maxsize=25)
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
+        self.__internal_input_Q = queue.Queue()
+        self.__Qs.append(self.__internal_input_Q)
         self.__generator_stop_event = threading.Event()
         self.__trigger_stop_event = threading.Event()
         self.__q_stop_event = threading.Event()

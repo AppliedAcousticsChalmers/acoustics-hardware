@@ -11,6 +11,16 @@ def flush_Q(q):
             break
 
 
+def concatenate_Q(q):
+    data_list = []
+    while True:
+        try:
+            data_list.append(q.get(timeout=0.1))
+        except queue.Empty:
+            break
+    return np.concatenate(data_list, axis=-1)
+
+
 class LevelDetector:
     def __init__(self, channel, fs, time_constant=50e-3):
         self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
