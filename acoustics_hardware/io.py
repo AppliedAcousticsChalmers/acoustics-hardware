@@ -4,9 +4,10 @@ import numpy as np
 import multiprocessing
 import threading
 import queue
+from . import core
 
 
-class HDFWriter:
+class HDFWriter(core.Distributor):
     """ Implements writing to HDF 5 files """
     _timeout = 0.1
 
@@ -26,16 +27,29 @@ class HDFWriter:
         self._internal_Q = multiprocessing.Queue()
         self._datasets = []
         self._manual_dataset = None
+        self._started = False
 
         self._stop_event = threading.Event()
+
+    @property
+    def device(self):
+        return self._devices
+
+    @device.setter
+    def device(self, device):
+        self.add_input(device=device)
 
     def add_input(self, device=None, Q=None):
         if device is None and Q is None:
             raise ValueError('Either `device` or `Q` must be given as input')
         if Q is None:
-            Q = device.input_Q
+            Q = device._register_input_Q()
         self._devices.append(device)
         self._input_Qs.append(Q)
+
+    def setup(self):
+        if not self._started:
+            self.start()
 
     def start(self, mode='auto', use_process=True):
         self.mode = mode
@@ -56,6 +70,7 @@ class HDFWriter:
                 def join():
                     return True
             self._thread = Dummy_thread
+        self._started = True
 
     def stop(self):
         self._stop_event.set()
