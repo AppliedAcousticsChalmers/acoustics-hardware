@@ -92,7 +92,6 @@ class HDFWriter(core.Distributor):
 
     def _create_dataset(self, name=None, ndim=2, index=None, **kwargs):
         if name is None:
-            # TODO: What if the set already exists?
             name = 'data{}'.format(index).replace('None', '')  # Default name for sets
         if name in self._group:
             name_idx = 0
@@ -114,11 +113,15 @@ class HDFWriter(core.Distributor):
         return dataset
 
     def write(self, **kwargs):
-        # TODO: debug the step keyword
-        # We want it to work both for True/False in both manual writes and signal mode,
-        # as well as with an index / a list of indices for the signalled mode
+        """
+        Todo:
+            - Debug the ``step`` keyword. We want it to work both for True/False
+                in both manual writes and signal mode, as well as with an index
+                or a list of indices for the signalled mode.
+            - Allow for manual writes regardless of the mode. If the write function
+                is called with some data or a Q, write that data to the manual dataset.
+        """
         if self.mode == 'auto':
-            # TODO: raise?
             pass
         elif self.mode == 'signal':
             if 'step' in kwargs:
@@ -126,9 +129,7 @@ class HDFWriter(core.Distributor):
                     self.step(axis=kwargs['step'], index=idx)
             self._write_signal.set()
         elif self.mode == 'manual':
-            # TODO: Enable manual writes regardless of mode
-            # If the write function is called with some data or a Q,
-            # write that data to the manual dataset
+
             idx = kwargs.pop('index', None)
             if 'name' in kwargs:
                 create_args = kwargs.copy()
@@ -188,7 +189,6 @@ class HDFWriter(core.Distributor):
             self.write_attrs(index=index, **attrs)
 
     def _write(self, data, index=None):
-        # TODO: make sure that data is a ndarray?
         if index is None:
             # Not an automated write from device Q
             try:
@@ -225,17 +225,21 @@ class HDFWriter(core.Distributor):
         self._internal_Q.put(('step', kwargs))
 
     def _step(self, axis=True, index=None):
+        """
+        Todo:
+            Give a warning if someone tries to step a non-existing dataset
+        """
         if index is None:
             try:
                 dataset, head, data_shape = self._manual_dataset
             except TypeError:
-                # TODO: This happens if someone tries to step before datasets are created
+                # This happens if someone tries to step before datasets are created
                 return
         else:
             try:
                 dataset, head, data_shape = self._datasets[index]
             except TypeError:
-                # TODO: TypeError if someone tries to step before datasets are created
+                # TypeError if someone tries to step before datasets are created
                 return
 
         if isinstance(axis, bool):
@@ -273,7 +277,6 @@ class HDFWriter(core.Distributor):
 
     def _write_target(self):
         def handle(item):
-            # TODO: Well, we need to handle the incomming items
             if item is None:
                 raise StopIteration
             else:
@@ -301,7 +304,6 @@ class HDFWriter(core.Distributor):
         self._file.close()
 
     def _auto_target(self):
-        # TODO: Create named 2D datasets for the Qs/devices
         for idx, device in enumerate(self._devices):
             name = getattr(device, 'label', getattr(device, 'name', 'dataset{}'.format(idx)))
             self.create_dataset(name=name, ndim=2, index=idx)
@@ -322,11 +324,9 @@ class HDFWriter(core.Distributor):
                 self._internal_Q.put(('write', (data, idx)))
 
     def _signal_target(self):
-        # TODO: Create named 3D datasets for all Qs
         for idx, device in enumerate(self._devices):
             name = getattr(device, 'label', getattr(device, 'name', 'dataset{}'.format(idx)))
             self.create_dataset(name=name, ndim=3, index=idx)
-        # TODO: Enable ndim configuration
         while not self._stop_event.is_set():
             if self._write_signal.wait(self._timeout):
                 self._write_signal.clear()

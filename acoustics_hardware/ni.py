@@ -21,6 +21,9 @@ class NIDevice(core.Device):
 
     See Also:
         `acoustics_hardware.core.Device`.
+    Todo:
+        The framesize needs reasonable defaults, and needs to be protected
+        by validity checks.
     """
     @staticmethod
     def get_devices(name=None):
@@ -61,8 +64,7 @@ class NIDevice(core.Device):
                     raise
         else:
             self.fs = fs
-        self.framesize = framesize  # TODO: Any automitic way to make sure that this will work? The buffer needs to be an even divisor of the device buffer size
-        # The device buffer size can be accessed via the task in/out stream, but these are tricky to access.
+        self.framesize = framesize
         self.dtype = dtype
 
     @property
@@ -97,10 +99,12 @@ class NIDevice(core.Device):
         """The bitdepth for the device.
 
         Currently only implemented for input devices.
+
+        Todo:
+            - What would be the expected behavior if the channels have different depths?
+            - Chack that the task exists, else warn.
         """
-        # TODO: This can only be called from the device process, otherwise the task is not available
         if channel is None:
-            # TODO: What would be the expected behavior if the channels have different depths??
             ch_idx = 0
         else:
             ch_idx = self.inputs.index(channel)
@@ -111,8 +115,10 @@ class NIDevice(core.Device):
 
         Only valid when using raw, unscaled, data types.
         Currently only implemented for input devices.
+
+        Todo:
+            - Chack that the task exists, else warn.
         """
-        # TODO: This can only be called from the device process, otherwise the task is not available
         if channel is None:
             return max([ch.ai_raw_samp_size for ch in self._task.ai_channels])
         else:
@@ -124,8 +130,10 @@ class NIDevice(core.Device):
 
         Returns the polynomial coefficients required to calculate
         input voltage from unscaled integers.
+
+        Todo:
+            - Chack that the task exists, else warn.
         """
-        # TODO: This can only be called from the device process, otherwise the task is not available
         if channels is None:
             channels = self.inputs
         try:
@@ -137,6 +145,12 @@ class NIDevice(core.Device):
             return [self._task.ai_channels[idx].ai_dev_scaling_coeff for idx in ch_idx]
 
     def _hardware_run(self):
+        """
+        Todo:
+            - Merge the callback creation function internally in this function.
+                Since they will never be used outside of here, and only once,
+                it does not make much sense to keep them as functions.
+        """
         self._task = nidaqmx.Task()
         for ch in self.inputs:
             self._task.ai_channels.add_ai_voltage_chan(self.name + '/ai{}'.format(int(ch)))
@@ -146,7 +160,6 @@ class NIDevice(core.Device):
             self._task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
                     sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
 
-        # TODO: Setter instead?
         if self.dtype.lower() == 'unscaled' or self.dtype.lower() == 'int':
             wl = self.word_length()
             self.dtype = 'int{}'.format(int(wl))
@@ -157,9 +170,6 @@ class NIDevice(core.Device):
 
         self._task.start()
         self._hardware_stop_event.wait()
-        # TODO: How reliable is this? There have been some errors while stopping from here, but nothing that broke
-        # Is it better to stop the device from within the callback?
-        # It would be more expensive to check the stop event inside the callback for each frame
         self._task.stop()
         self._task.wait_until_done(timeout=10)
         self._task.close()

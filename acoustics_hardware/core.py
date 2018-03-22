@@ -25,7 +25,6 @@ class Device:
         max_inputs (`int`): The maximum number of inputs available.
         max_outputs (`int`): The maximum number of outputs available.
         calibrations (`numpy.ndarray`): Calibrations of input channels, defaults to 1 for missing calibrations.
-
     """
     _generator_timeout = 1
     _trigger_timeout = 1
@@ -77,8 +76,6 @@ class Device:
         """
         self.__main_stop_event.set()
         # self.__process.join(timeout=10)
-        # TODO: We will not wait for the process now, since it will not finish if there are
-        # items left in the Q.
 
     def add_input(self, index, **kwargs):
         """Adds a new input `Channel`.
@@ -198,11 +195,11 @@ class Device:
             value (`float`): The value of the reference signal, defaults to 1.
             ctype (``'rms'``): Use to switch between different calibration methods. Currently not used.
             unit (`str`): The unit of the calibrated quantity, defaults to ``'V'``.
-
+        Todo:
+            - Filtering the input before detecting the level
+            - Average over multiple parts
+            - Determine a reasonable value of the averaging coefficient
         """
-        # TODO: Is this a good value for the time_constant?
-        # TODO: Pre-filters
-        # TODO: Average over the whole sequence
         detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
         timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
         self.__triggers.append(detector)
@@ -229,10 +226,11 @@ class Device:
             The frames are NOT copied to multiple queues!
         See Also:
             `_unregister_input_Q`
+        Todo:
+            Give a warning instead of an error while running.
 
         """
         if self.__main_thread.is_alive():
-            # TODO: Custom warning class
             raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
             # Q = multiprocessing.Queue()
@@ -252,12 +250,12 @@ class Device:
             Q (`~queue.Queue`): The Q to remove.
         See Also:
             `_register_input_Q`
+        Todo:
+            Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            # TODO: Custom warning class
             raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
         else:
-            # TODO: What should happen if the Q is not in the list?
             self.__Qs.remove(Q)
 
     def add_distributor(self, distributor):
@@ -267,9 +265,10 @@ class Device:
             distributor (`Distributor`): The distributor to add.
         See Also:
             `Distributor`, `remove_distributor`
+        Todo:
+            Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            # TODO: Custom warning class
             raise UserWarning('It is not possible to add distributors while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__distributors.append(distributor)
@@ -282,9 +281,10 @@ class Device:
             distributor (`Distributor`): The distributor to remove.
         See Also:
             `Distributor`, `add_distributor`
+        Todo:
+            Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            # TODO: Custom warning class
             raise UserWarning('It is not possible to remove distributors while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__distributors.remove(distributor)
@@ -300,10 +300,10 @@ class Device:
             trigger (`Trigger`): The trigger to add.
         See Also:
             `Trigger`, `remove_trigger`
+        Todo:
+            Give a warning instead of an error while running.
         """
-        # TODO: Documentation
         if self.__main_thread.is_alive():
-            # TODO: Custom warning class
             raise UserWarning('It is not possible to add new triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.append(trigger)
@@ -316,10 +316,10 @@ class Device:
             trigger (`Trigger`): The trigger to remove.
         See Also:
             `Trigger`, `add_trigger`
+        Todo:
+            Give a warning instead of an error while running.
         """
-        # TODO: Documentation
         if self.__main_thread.is_alive():
-            # TODO: Custom warning class
             raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
         else:
             self.__triggers.remove(trigger)
@@ -337,6 +337,8 @@ class Device:
             dictates which output channel receives data from which generator.
             The total number of generated channels must match the number of
             output channels.
+        Todo:
+            Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
             raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
@@ -351,6 +353,8 @@ class Device:
             generator (`Generator`): The generator to remove.
         See Also:
             `Generator`, `add_generator`
+        Todo:
+            Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
             raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
@@ -426,16 +430,18 @@ class Device:
         self.__q_stop_event.set()
         q_thread.join()
         self.__reset()
-        # TODO: We will not finish the process if there are items still in the Q,
-        # the question is what we want to do about it?
 
     def __trigger_target(self):
         """Trigger handling method.
 
         This method will execute as a subthread in the device, responsible
         for managing the attached triggers, and handling input data.
+
+        Todo:
+            - Pre-triggering using appropriate values
+            - Post-triggering
+            - Aligning triggers?
         """
-        # TODO: Get buffer size depending on pre-trigger value
         data_buffer = collections.deque(maxlen=10)
         for trigger in self.__triggers:
             trigger.setup()

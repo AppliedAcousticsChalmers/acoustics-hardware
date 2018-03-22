@@ -20,6 +20,9 @@ class AudioDevice(core.Device):
             name (`str`, optional): incomplete name of device or ``None``
         Returns:
             Complete name of device, or list of all devices.
+        Todo:
+            - The framesize by default set to 1024, is this appropriate?
+            - `sounddevice` allows for variable framesizes, can we make use of this somehow?
         """
         if name is None:
             return sd.query_devices()
@@ -39,8 +42,6 @@ class AudioDevice(core.Device):
             self.fs = fs
 
         if framesize is None:
-            # TODO: Is this a good default?
-            # The sounddevice package allows for variable frames for in/out which is principle is faster, can we make use of this somehow?
             self.framesize = 1024
         else:
             self.framesize = framesize

@@ -22,16 +22,21 @@ def concatenate_Q(q):
 
 
 class LevelDetector:
+    """
+    Todo:
+        - Document properly!
+        - Should this class have device awareness the same way as a Trigger?
+            That would solve some initialisations, e.g. ``fs``.
+        - Multichannel detector?
+    """
     def __init__(self, channel, fs, time_constant=50e-3):
-        self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
+        self.fs = fs
         self.time_constant = time_constant
 
-        # TODO: Multichannel level detector?
         self.channel = channel
         self.reset()
 
     def __call__(self, block):
-        # TODO: Enable custom mappings?
         # Squared input level is tracked in order for the RMS trigger to work properly.
         input_levels = block[self.channel]**2
         output_levels, self._buffer = lfilter([self._digital_constant], [1, self._digital_constant - 1], input_levels, zi=self._buffer)
@@ -55,7 +60,7 @@ class LevelDetector:
 
 class LevelDetectorAttackRelease:
     def __init__(self, *, channel, fs, time_constant=None, attack_time=None, release_time=None):
-        self.fs = fs  # TODO: Warning if the sampling frequency is no set? Or just wait until we start and crash everything.
+        self.fs = fs
         if attack_time is not None and release_time is not None:
             # separate attack and release times specified, used them
             # Attack and release time are defined as the time it takes for a step
@@ -68,18 +73,15 @@ class LevelDetectorAttackRelease:
         else:
             self.time_constant = 50e-3  # Default value of 50 ms
 
-        # TODO: Multichannel level detector?
         self.channel = channel
         self.current_level = 0
 
-    # TODO: If the loop is not fast enough there are a few options.
-    # If we drop the possibility for separate attack and release times, the level detector is
-    # just a IIR filter, so we could use scipy.signal.lfilter([1, (1-alpha)], alpha, input_levels)
-    # It should also be possible (I think) to write the level detector using Faust, and just drop in the
-    # wrapped Faust code here. If I manage to get that working it could also be used for all other crazy
-    # filters we might want to use.
     def __call__(self, block):
-        # TODO: Make the function configurable, e.g. abs() or **2 etc.
+        """
+        Todo:
+            This is too slow. If this style of detector is kept it must be improved
+            with better processing. Possibilities are cython, numbe, or faust.
+        """
         input_levels = np.abs(block[self.channel])
         output_levels = np.empty_like(input_levels)
         level = self.current_level  # Get the level after the privious block
@@ -125,6 +127,5 @@ class LevelDetectorAttackRelease:
             value = (value, value)
 
         # if len(value) is not 2:
-            # TODO: Warn?
         self.attack_time = value[0] * 2.2
         self.release_time = value[1] * 2.2
