@@ -16,9 +16,6 @@ class AudioDevice(core.Device):
 
     Implementation of the `~core.Device` framework for audio interfaces.
     Built on top of the `sounddevice <http://python-sounddevice.readthedocs.io/>`_ package.
-
-    See Also:
-        `acoustics_hardware.core.Device`.
     """
     @staticmethod
     def get_devices(name=None):
@@ -110,8 +107,6 @@ class NIDevice(core.Device):
     Implementation of the `~core.Device` framework for national instruments hardware.
     Built on top of the `nidaqmx <https://nidaqmx-python.readthedocs.io/>`_ package.
 
-    See Also:
-        `acoustics_hardware.core.Device`.
     Todo:
         The framesize needs reasonable defaults, and needs to be protected
         by validity checks.

@@ -224,8 +224,6 @@ class Device:
             `~queue.Queue`: The registered Q.
         Note:
             The frames are NOT copied to multiple queues!
-        See Also:
-            `_unregister_input_Q`
         Todo:
             Give a warning instead of an error while running.
 
@@ -248,8 +246,6 @@ class Device:
 
         Arguments:
             Q (`~queue.Queue`): The Q to remove.
-        See Also:
-            `_register_input_Q`
         Todo:
             Give a warning instead of an error while running.
         """
@@ -263,8 +259,6 @@ class Device:
 
         Arguments:
             distributor (`Distributor`): The distributor to add.
-        See Also:
-            `Distributor`, `remove_distributor`
         Todo:
             Give a warning instead of an error while running.
         """
@@ -279,8 +273,6 @@ class Device:
 
         Arguments:
             distributor (`Distributor`): The distributor to remove.
-        See Also:
-            `Distributor`, `add_distributor`
         Todo:
             Give a warning instead of an error while running.
         """
@@ -298,8 +290,6 @@ class Device:
 
         Arguments:
             trigger (`Trigger`): The trigger to add.
-        See Also:
-            `Trigger`, `remove_trigger`
         Todo:
             Give a warning instead of an error while running.
         """
@@ -314,8 +304,6 @@ class Device:
 
         Arguments:
             trigger (`Trigger`): The trigger to remove.
-        See Also:
-            `Trigger`, `add_trigger`
         Todo:
             Give a warning instead of an error while running.
         """
@@ -330,8 +318,6 @@ class Device:
 
         Arguments:
             generator (`Generator`): The generator to add.
-        See Also:
-            `Generator`, `remove_generator`
         Note:
             The order that multiple generators are added to a device
             dictates which output channel receives data from which generator.
@@ -351,8 +337,6 @@ class Device:
 
         Arguments:
             generator (`Generator`): The generator to remove.
-        See Also:
-            `Generator`, `add_generator`
         Todo:
             Give a warning instead of an error while running.
         """

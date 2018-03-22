@@ -8,14 +8,13 @@ from . import core, utils
 class QGenerator(core.Generator):
     """Generator using `queue.Queue`.
 
+    Implementation of a `~core.Generator` using a queue.
     Takes data from an input queue and generates frames with the correct
     framesize. The input queue must be filled fast enough otherwise the
     device output is cancelled.
 
     Attributes:
         Q (`~queue.Queue`): The queue from where data is extracted.
-    See Also:
-        `acoustics_hardware.core.Generator`
     """
     def __init__(self):
         core.Generator.__init__(self)
@@ -50,13 +49,13 @@ class QGenerator(core.Generator):
 class ArbitrarySignalGenerator(core.Generator):
     """Repeated generation of arbritrary signals.
 
+    Implementation of `~core.Generator` for arbritrary signals.
+
     Arguments:
         repetitions (`float`): The number of cycles to output before stopping, default `np.inf`.
         **kwargs: Will be saved as ``kwargs`` and accessible in `setup`.
     Keyword Arguments:
         signal (`numpy.ndarray`): One cycle of the signal to output.
-    See Also:
-        `acoustics_hardware.core.Generator`
     """
     def __init__(self, repetitions=np.inf, **kwargs):
         core.Generator.__init__(self)
@@ -161,7 +160,9 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
 
 
 class FunctionGenerator(core.Generator):
-    """Generates functional descriptions of signals.
+    """Generates signals from a shape function.
+
+    Implementation of `~core.Generator` for standard funcitons.
 
     Arguments:
         frequency (`float`): The frequecy of the signal, in Hz.
@@ -233,6 +234,8 @@ class FunctionGenerator(core.Generator):
 
 class NoiseGenerator(core.Generator):
     """Generates colored noise.
+
+    Implementation of `~core.Generator` for random noise signals.
 
     Arguments:
         color (`str`, optional): The color of the noise. Each color corresponds
