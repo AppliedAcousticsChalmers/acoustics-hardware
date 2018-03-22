@@ -6,6 +6,17 @@ from . import core, utils
 
 
 class QGenerator(core.Generator):
+    """Generator using `queue.Queue`.
+
+    Takes data from an input queue and generates frames with the correct
+    framesize. The input queue must be filled fast enough otherwise the
+    device output is cancelled.
+
+    Attributes:
+        Q (`~queue.Queue`): The queue from where data is extracted.
+    See Also:
+        `acoustics_hardware.core.Generator`
+    """
     def __init__(self):
         core.Generator.__init__(self)
         self.Q = queue.Queue()
@@ -31,11 +42,22 @@ class QGenerator(core.Generator):
         return np.concatenate(gen_frame, axis=-1)
 
     def reset(self):
+        """Clears the input queue."""
         core.Generator.reset(self)
         utils.flush_Q(self.Q)
 
 
 class ArbitrarySignalGenerator(core.Generator):
+    """Repeated generation of arbritrary signals.
+
+    Arguments:
+        repetitions (`float`): The number of cycles to output before stopping, default `np.inf`.
+        **kwargs: Will be saved as ``kwargs`` and accessible in `setup`.
+    Keyword Arguments:
+        signal (`numpy.ndarray`): One cycle of the signal to output.
+    See Also:
+        `acoustics_hardware.core.Generator`
+    """
     def __init__(self, repetitions=np.inf, **kwargs):
         core.Generator.__init__(self)
         self.repetitions = repetitions  # Default to continious output
@@ -67,10 +89,20 @@ class ArbitrarySignalGenerator(core.Generator):
         self.repetitions_done = 0
 
     def setup(self):
-        """
-        Implements signal creation. Create one cycle of the signal and store it
-        in `self.signal`. Access the underlying device as `self.device`, which has
-        important properties, e.g. samplerate `fs`.
+        """Configures the signal.
+
+        Create the signal manually and pass it while creating the generator
+        as the ``signal`` argument.
+
+        It is possible to inherit `ArbitrarySignalGenerator` and override the
+        setup method. Create one cycle of the signal and store it in
+        ``self.signal``. Access the underlying device as ``self.device``,
+        which has important properties, e.g. samplerate ``fs``.
+        All keyword arguments passed while creating instances are available
+        as ``self.kwargs``.
+
+        Note:
+            Call `ArbitrarySignalGenerator.setup(self)` from subclasses.
         """
         core.Generator.setup(self)
         if 'signal' in self.kwargs:
@@ -78,6 +110,20 @@ class ArbitrarySignalGenerator(core.Generator):
 
 
 class SweepGenerator(ArbitrarySignalGenerator):
+    """Swept sine generator.
+
+    Arguments:
+        start_frequency (`float`): Initial frequency of the sweep, in Hz.
+        stop_frequency (`float`): Final frequency of the sweep, in Hz.
+        duration (`float`): Duration of a single sweep, in seconds.
+        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
+        method (`str`, optional): Chooses the type of sweep, see
+            `~scipy.signal.chirp`, default ``'logarithmic'``.
+        bidirectional (`bool`, optional): If the sweep is bidirectional or not,
+            default ``False``.
+    See Also:
+        `ArbitrarySignalGenerator`, `scipy.signal.chirp`
+    """
     def __init__(self, start_frequency, stop_frequency, duration, method='logarithmic', bidirectional=False, **kwargs):
         ArbitrarySignalGenerator.__init__(self, **kwargs)
         self.start_frequency = start_frequency
@@ -96,6 +142,14 @@ class SweepGenerator(ArbitrarySignalGenerator):
 
 
 class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
+    """Generation of maximum length sequences.
+
+    Arguments:
+        order (`int`): The order or the sequence. The total length  is ``2**order - 1``.
+        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
+    See Also:
+        `ArbitrarySignalGenerator`, `scipy.signal.max_len_seq`
+    """
     def __init__(self, order, **kwargs):
         ArbitrarySignalGenerator.__init__(self, **kwargs)
         self.order = order
@@ -107,6 +161,22 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
 
 
 class FunctionGenerator(core.Generator):
+    """Generates functional descriptions of signals.
+
+    Arguments:
+        frequency (`float`): The frequecy of the signal, in Hz.
+        amplitude (`float`, optional): The amplitude of the signal, default to 1.
+        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
+        shape (`str`, optional): Function shape, default ``'sine'``. Currently
+            available functions are
+
+                - ``'sine'``: `numpy.sin`
+                - ``'sawtooth'``: `scipy.signal.sawtooth`
+                - ``'square'``: `scipy.signal.square`
+
+        phase_offset (`float`, optional): Phase offset of the signal in radians, default 0.
+        **kwargs: Other keywork arguments will be passed to the shape function.
+    """
     _functions = {
         'sin': waveforms.sin,
         'saw': waveforms.sawtooth,
@@ -162,6 +232,33 @@ class FunctionGenerator(core.Generator):
 
 
 class NoiseGenerator(core.Generator):
+    """Generates colored noise.
+
+    Arguments:
+        color (`str`, optional): The color of the noise. Each color corresponds
+            to a inverse frequency power in the noise power density spectrum.
+            Default is ``'white'``.
+
+            - ``'purple'``: -2
+            - ``'blule'``: -1
+            - ``'white'``: 0
+            - ``'pink'``: 1
+            - ``'brown'``: 2
+        method (`str`, optional): The method used to create the noise.
+            Currently two methods are implemented, a ``'fft'`` method and
+            an ``'autoregressive'`` method. The default is ``'autoregressive'``.
+            The autoregressive method is more expensive for small framesizes,
+            but gives the same performance regardless of the framesize. The
+            fft method have bad low-frequency performance for small framesizes.
+    References:
+        N. J. Kasdin, “Discrete simulation of colored noise and stochastic
+        processes and 1/f^α power law noise generation,” Proceedings of the
+        IEEE, vol. 83, no. 5, pp. 802–827, May 1995.
+        :doi:`10.1109/5.381848`
+    Todo:
+        Variable amplitudes and maximum amplitudes.
+
+    """
     _color_slopes = {
         'purple': -2,
         'blue': -1,
@@ -179,7 +276,6 @@ class NoiseGenerator(core.Generator):
     def _fft_noise(self):
         normal = np.random.normal(size=self.device.framesize)
         shaped = ifft(self._spectral_coefficients * fft(normal))
-        # TODO: Normalization, variable amplitude, soft clipping?
         return shaped
 
     def _fft_setup(self):
