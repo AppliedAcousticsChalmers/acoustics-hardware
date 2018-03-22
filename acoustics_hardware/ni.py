@@ -38,7 +38,13 @@ class NIDevice(core.Device):
         Returns:
             Complete name of device, or list of all devices.
         """
-        system = nidaqmx.system.System.local()
+        try:
+            system = nidaqmx.system.System.local()
+        except NameError as e:
+            if e.args[0] == "name 'nidaqmx' is not defined":
+                raise ModuleNotFoundError("Windows-only module 'nidaqmx' is not installed")
+            else:
+                raise e
         name_list = [dev.name for dev in system.devices]
         if name is None:
             return name_list
