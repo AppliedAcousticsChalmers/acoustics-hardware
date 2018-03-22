@@ -530,7 +530,7 @@ class Device:
                     use_prev_frame = True
 
 
-class Channel:
+class Channel(int):
     """Represents a channel of a device.
 
     Contains information about a physical channel used.
@@ -566,6 +566,9 @@ class Channel:
         """
         return json.dumps(self.__dict__)
 
+    def __new__(cls, index, *args, **kwargs):
+        return super(Channel, cls).__new__(cls, index)
+
     def __init__(self, index, chtype, label=None, calibration=None, unit=None):
         self.index = index
         self.chtype = chtype
@@ -573,23 +576,14 @@ class Channel:
         self.calibration = calibration
         self.unit = unit
 
-    def __eq__(self, other):
-        try:
-            chtype_eq = self.chtype == other.chtype
-        except AttributeError:
-            chtype_eq = True
-        return self.index == other and chtype_eq
-
-    def __int__(self):
-        return self.index
-
     def __repr__(self):
         return self.__class__.__name__ + '(' + ', '.join(['{}={}'.format(key, value) for key, value in self.__dict__.items()]) + ')'
 
     def __str__(self):
         label_str = '' if self.label is None else ' "{}"'.format(self.label)
         calib_str = '' if self.calibration is None else ' ({:.4g} {})'.format(self.calibration, self.unit)
-        return '{chtype} channel {index}{label}{calib}'.format(chtype=self.chtype, index=self.index, label=label_str, calib=calib_str).capitalize()
+        ch_str = '{chtype} channel {index}'.format(chtype=self.chtype, index=self.index).capitalize()
+        return '{ch}{label}{calib}'.format(ch=ch_str, label=label_str, calib=calib_str)
 
 
 class Trigger:
