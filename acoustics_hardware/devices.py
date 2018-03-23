@@ -14,8 +14,13 @@ except ModuleNotFoundError:
 class AudioDevice(core.Device):
     """Class for interacting with audio interfaces.
 
-    Implementation of the `~core.Device` framework for audio interfaces.
+    Implementation of the `~.core.Device` framework for audio interfaces.
     Built on top of the `sounddevice <http://python-sounddevice.readthedocs.io/>`_ package.
+
+    Arguments:
+        name (`str`): Partial or full name of the audio interface.
+        fs (`float`, optional): Sample rate for the device, defaults to system default for the device.
+        framesize (`int`, optional): The framesize for inputs and outputs, defaults to 1024 samples.
     """
     @staticmethod
     def get_devices(name=None):
@@ -104,9 +109,14 @@ class AudioDevice(core.Device):
 class NIDevice(core.Device):
     """Class for interacting with national instruments hardware.
 
-    Implementation of the `~core.Device` framework for national instruments hardware.
+    Implementation of the `~.core.Device` framework for national instruments hardware.
     Built on top of the `nidaqmx <https://nidaqmx-python.readthedocs.io/>`_ package.
 
+    Arguments:
+        name (`str`): Partial or full name of the audio interface.
+        fs (`float`, optional): Sample rate for the device, defaults maximum supported rate.
+        framesize (`int`, optional): The framesize for inputs and outputs, defaults to 10000 samples.
+        dtype (`str`, optional): The datatype used while reading input data, default ``'float64'``.
     Todo:
         The framesize needs reasonable defaults, and needs to be protected
         by validity checks.

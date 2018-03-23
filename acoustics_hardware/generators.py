@@ -8,7 +8,7 @@ from . import core, utils
 class QGenerator(core.Generator):
     """Generator using `queue.Queue`.
 
-    Implementation of a `~core.Generator` using a queue.
+    Implementation of a `~.core.Generator` using a queue.
     Takes data from an input queue and generates frames with the correct
     framesize. The input queue must be filled fast enough otherwise the
     device output is cancelled.
@@ -49,7 +49,7 @@ class QGenerator(core.Generator):
 class ArbitrarySignalGenerator(core.Generator):
     """Repeated generation of arbritrary signals.
 
-    Implementation of `~core.Generator` for arbritrary signals.
+    Implementation of `~.core.Generator` for arbritrary signals.
 
     Arguments:
         repetitions (`float`): The number of cycles to output before stopping, default `np.inf`.
@@ -162,7 +162,7 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
 class FunctionGenerator(core.Generator):
     """Generates signals from a shape function.
 
-    Implementation of `~core.Generator` for standard funcitons.
+    Implementation of `~.core.Generator` for standard funcitons.
 
     Arguments:
         frequency (`float`): The frequecy of the signal, in Hz.
@@ -176,7 +176,7 @@ class FunctionGenerator(core.Generator):
                 - ``'square'``: `scipy.signal.square`
 
         phase_offset (`float`, optional): Phase offset of the signal in radians, default 0.
-        **kwargs: Other keywork arguments will be passed to the shape function.
+        **kwargs: Other keyword arguments will be passed to the shape function.
     """
     _functions = {
         'sin': waveforms.sin,
@@ -235,7 +235,7 @@ class FunctionGenerator(core.Generator):
 class NoiseGenerator(core.Generator):
     """Generates colored noise.
 
-    Implementation of `~core.Generator` for random noise signals.
+    Implementation of `~.core.Generator` for random noise signals.
 
     Arguments:
         color (`str`, optional): The color of the noise. Each color corresponds
@@ -243,7 +243,7 @@ class NoiseGenerator(core.Generator):
             Default is ``'white'``.
 
             - ``'purple'``: -2
-            - ``'blule'``: -1
+            - ``'blue'``: -1
             - ``'white'``: 0
             - ``'pink'``: 1
             - ``'brown'``: 2

@@ -520,23 +520,21 @@ class Channel(int):
     Contains information about a physical channel used.
 
     Arguments:
-        index (int): Zero-based index of the channel in the device.
+        index (`int`): Zero-based index of the channel in the device.
         chtype (``'input'`` or ``'output'``): Type of channel.
-        label (str, optional): User label for identification of the channel.
-        calibration (float, optional): Manual calibration value.
-        unit (str, optional): Physical unit of the calibrated channel.
+        label (`str`, optional): User label for identification of the channel.
+        calibration (`float`, optional): Manual calibration value.
+        unit (`str`, optional): Physical unit of the calibrated channel.
     """
     @classmethod
     def from_json(cls, json_dict):
         """Creates a channel from json representation.
 
         Arguments:
-            json_dict (str): json representation of a dictionary containing
+            json_dict (`str`): json representation of a dictionary containing
                 key-value pairs for the arguments of a `Channel`.
         Returns:
             `Channel`: A channel with the given specification.
-        See Also:
-            `Channel.to_json`
         """
         return cls(**json.loads(json_dict))
 
@@ -544,9 +542,7 @@ class Channel(int):
         """Create json representation of this channel.
 
         Returns:
-            str: json representation.
-        See Also:
-            `Channel.from_json`.
+            `str`: json representation.
         """
         return json.dumps(self.__dict__)
 
@@ -579,22 +575,18 @@ class Trigger:
     e.g. activate the input of a `Device`.
 
     Arguments:
-        action (callable or list of callables): Initial list of ``actions``.
-        false_action (callable or list of callables): Initial list of ``false_actions``.
-        auto_deactivate (`bool`): Initial setting for ``auto_deactivate``, default ``True``.
-        use_calibrations (`bool`): Initial setting for ``use_calibrations``, default ``True``.
+        actions (callable or list of callables): The actions that will be
+            called each time the test evaluates to ``True``.
+        false_actions (callable or list of callables): The actions that will be
+            called each time the test evaluates to ``False``.
+        auto_deactivate (`bool`): Sets if the trigger deactivates itself when
+            the test is ``True``. Useful to only trigger once, dafault ``True``.
+        use_calibrations (`bool`): Sets if calibration values from the `Device`
+            should be used for the test, default ``True``.
     Attributes:
         active (`~threading.Event`): Controls if the trigger is active or not.
             A deactivated trigger will still test (e.g. to track levels), but
             not take action. Triggers start of as active unless manually deactivated.
-        actions (list of callables): The actions that will be
-            called each time the test evaluates to ``True``.
-        false_actions (list of callables): The actions that will be
-            called each time the test evaluates to ``False``.
-        auto_deactivate (`bool`): Sets if the trigger deactivates itself when
-            the test is ``True``. Useful to only trigger once.
-        use_calibrations (`bool`): Sets if calibration values from the `Device`
-            should be used for the test.
     """
     def __init__(self, action=None, false_action=None, auto_deactivate=True, use_calibrations=True):
         # self.active = multiprocessing.Event()
