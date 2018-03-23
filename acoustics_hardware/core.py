@@ -719,6 +719,42 @@ class GeneratorStop(Exception):
     pass
 
 
+class Processor:
+    """Base class for processors
+
+    A processor is an object that manipulates the data in some way.
+    """
+    def __init__(self, device=None):
+        self.device = device
+
+    def __call__(self, frame):
+        return self.process(frame)
+
+    def process(self, frame):
+        """Processes a single fraame of input.
+
+        The input frame might be the rame object as the read frame, so a
+        processor should not manitulate the data in place.
+
+        Arguments:
+            frame (`numpy.ndarray`): ``(n_ch, n_samp)`` shape input frame.
+        """
+
+    def setup(self):
+        pass
+
+    def reset(self):
+        pass
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, device):
+        self._device = device
+
+
 class Distributor:
     """Base class for Distributors.
 
