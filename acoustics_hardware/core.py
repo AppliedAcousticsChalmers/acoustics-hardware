@@ -588,7 +588,9 @@ class Trigger:
             A deactivated trigger will still test (e.g. to track levels), but
             not take action. Triggers start of as active unless manually deactivated.
     """
-    def __init__(self, action=None, false_action=None, auto_deactivate=True, use_calibrations=True):
+    def __init__(self, action=None, false_action=None, auto_deactivate=True,
+                 use_calibrations=True, device=None):
+        self.device = device
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
         self.active.set()
@@ -608,7 +610,6 @@ class Trigger:
                 self.false_actions.extend(false_action)
             except TypeError:
                 self.false_actions.append(false_action)
-        self.device = None
 
     def __call__(self, frame):
         """Manages testing and actions."""
@@ -673,8 +674,8 @@ class Generator:
     A `Generator` is an object that creates data for output channels in a
     `Device`. Refer to specific generators for more details.
     """
-    def __init__(self):
-        self.device = None
+    def __init__(self, device=None):
+        self.device = device
 
     def __call__(self):
         """Manages frame creation"""
@@ -725,8 +726,8 @@ class Distributor:
     `Device`, e.g. a plotter or a file writer. Refer to specific implementations
     for more details.
     """
-    def __init__(self):
-        self.device = None
+    def __init__(self, device=None):
+        self.device = device
 
     def reset(self):
         """Resets the distributor"""
