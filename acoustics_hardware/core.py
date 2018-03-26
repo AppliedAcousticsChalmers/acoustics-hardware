@@ -5,6 +5,7 @@ import collections
 import numpy as np
 from . import utils
 import json
+from .generators import GeneratorStop
 
 
 class Device:
@@ -286,10 +287,10 @@ class Device:
                 distributor.device = None
 
     def add_trigger(self, trigger):
-        """Adds a `Trigger` to the `Device`.
+        """Adds a Trigger to the Device.
 
         Arguments:
-            trigger (`Trigger`): The trigger to add.
+            trigger: The trigger to add.
         Todo:
             Give a warning instead of an error while running.
         """
@@ -300,10 +301,10 @@ class Device:
             trigger.device = self
 
     def remove_trigger(self, trigger):
-        """Removes a `Trigger` from the `Device`.
+        """Removes a Trigger from the Device.
 
         Arguments:
-            trigger (`Trigger`): The trigger to remove.
+            trigger: The trigger to remove.
         Todo:
             Give a warning instead of an error while running.
         """
@@ -314,10 +315,10 @@ class Device:
             trigger.device = None
 
     def add_generator(self, generator):
-        """Adds a `Generator` to the `Device`.
+        """Adds a Generator to the Device.
 
         Arguments:
-            generator (`Generator`): The generator to add.
+            generator: The generator to add.
         Note:
             The order that multiple generators are added to a device
             dictates which output channel receives data from which generator.
@@ -333,10 +334,10 @@ class Device:
             generator.device = self
 
     def remove_generator(self, generator):
-        """Removes a `Generator` from the `Device`.
+        """Removes a Generator from the Device.
 
         Arguments:
-            generator (`Generator`): The generator to remove.
+            generator: The generator to remove.
         Todo:
             Give a warning instead of an error while running.
         """
@@ -370,7 +371,7 @@ class Device:
         self.output_active.clear()
 
     def _Device__main_target(self):
-        """Main method for a `Device`.
+        """Main method for a Device.
 
         This is the method that is executed when the device is started.
         Four other threads will be started in this method, one for generators,
@@ -466,7 +467,7 @@ class Device:
 
         This method will execute as a subthread in the device, responsible
         for moving data from the input (while active) to the queues used by
-        `Distributors`.
+        Distributors.
         """
         for distributor in self.__distributors:
             distributor.setup()
@@ -564,199 +565,6 @@ class Channel(int):
         calib_str = '' if self.calibration is None else ' ({:.4g} {})'.format(self.calibration, self.unit)
         ch_str = '{chtype} channel {index}'.format(chtype=self.chtype, index=self.index).capitalize()
         return '{ch}{label}{calib}'.format(ch=ch_str, label=label_str, calib=calib_str)
-
-
-class Trigger:
-    """Base class for Trigger implementation.
-
-    A `Trigger` is an object that performs a test on all input data from a
-    `Device`, regardless if the input is set as active or not. If the test
-    evaluates to ``True`` the trigger will perform a set of actions,
-    e.g. activate the input of a `Device`.
-
-    Arguments:
-        actions (callable or list of callables): The actions that will be
-            called each time the test evaluates to ``True``.
-        false_actions (callable or list of callables): The actions that will be
-            called each time the test evaluates to ``False``.
-        auto_deactivate (`bool`): Sets if the trigger deactivates itself when
-            the test is ``True``. Useful to only trigger once, dafault ``True``.
-        use_calibrations (`bool`): Sets if calibration values from the `Device`
-            should be used for the test, default ``True``.
-    Attributes:
-        active (`~threading.Event`): Controls if the trigger is active or not.
-            A deactivated trigger will still test (e.g. to track levels), but
-            not take action. Triggers start of as active unless manually deactivated.
-    """
-    def __init__(self, action=None, false_action=None, auto_deactivate=True,
-                 use_calibrations=True, device=None):
-        self.device = device
-        # self.active = multiprocessing.Event()
-        self.active = threading.Event()
-        self.active.set()
-
-        self.actions = []
-        self.auto_deactivate = auto_deactivate
-        self.use_calibrations = use_calibrations
-        if action is not None:
-            try:
-                self.actions.extend(action)
-            except TypeError:
-                self.actions.append(action)
-
-        self.false_actions = []
-        if false_action is not None:
-            try:
-                self.false_actions.extend(false_action)
-            except TypeError:
-                self.false_actions.append(false_action)
-
-    def __call__(self, frame):
-        """Manages testing and actions."""
-        # We need to perform the test event if the triggering is disabled
-        # Some triggers (RMSTrigger) needs to update their state continuously to work as intended
-        # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
-        # start form zero
-        test = self.test(frame * self.calibrations)
-        if self.active.is_set():
-            # logger.debug('Testing in {}'.format(self.__class__.__name__))
-            if test:
-                [action() for action in self.actions]
-            else:
-                [action() for action in self.false_actions]
-
-    def test(self, frame):
-        """Performs test.
-
-        The trigger conditions should be implemented here.
-
-        Arguments:
-            frame (`numpy.ndarray`): The current input frame to test.
-        Returns:
-            `bool`: ``True`` -> do ``actions``, ``False`` -> do ``false_actions``
-        """
-        raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
-
-    def reset(self):
-        """Resets the trigger state."""
-        self.active.set()
-
-    def setup(self):
-        """Configures trigger state."""
-        if self.use_calibrations:
-            self.calibrations = self.device.calibrations
-        else:
-            self.calibrations = np.ones(len(self.device.inputs))
-
-    @property
-    def auto_deactivate(self):
-        return self.active.clear in self.actions
-
-    @auto_deactivate.setter
-    def auto_deactivate(self, value):
-        if value and not self.auto_deactivate:
-            self.actions.insert(0, self.active.clear)
-        elif self.auto_deactivate and not value:
-            self.actions.remove(self.active.clear)
-
-    @property
-    def device(self):
-        return self._device
-
-    @device.setter
-    def device(self, dev):
-        self._device = dev
-
-
-class Generator:
-    """Base class for generator implementations.
-
-    A `Generator` is an object that creates data for output channels in a
-    `Device`. Refer to specific generators for more details.
-    """
-    def __init__(self, device=None, **kwargs):
-        self.device = device
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-    def __call__(self):
-        """Manages frame creation"""
-        return np.atleast_2d(self.frame())
-
-    def frame(self):
-        """Generates a frame of output.
-
-        The generated frame must match the device framesize.
-        If the generator creates multiple channels, it should have the shape
-        ``(n_ch, framesize)``, otherwise 1d arrays are sufficient.
-
-        Returns:
-            `numpy.ndarray`: Generated frame.
-        """
-        raise NotImplementedError('Required method `frame` is not implemented in {}'.format(self.__class__.__name__))
-
-    def reset(self):
-        """Resets the generator."""
-        pass
-
-    def setup(self):
-        """Configures the generator state."""
-        pass
-
-    @property
-    def device(self):
-        return self._device
-
-    @device.setter
-    def device(self, dev):
-        self._device = dev
-
-
-class GeneratorStop(Exception):
-    """Raised by `Generators`.
-
-    This exception indicates that the generator have reached some stopping
-    criteria, e.g. end of file. Should be caught by the `Device` to stop output.
-    """
-    pass
-
-
-class Processor:
-    """Base class for processors
-
-    A processor is an object that manipulates the data in some way.
-    """
-    def __init__(self, device=None, **kwargs):
-        self.device = device
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-    def __call__(self, frame):
-        return self.process(frame)
-
-    def process(self, frame):
-        """Processes a single fraame of input.
-
-        The input frame might be the rame object as the read frame, so a
-        processor should not manitulate the data in place.
-
-        Arguments:
-            frame (`numpy.ndarray`): ``(n_ch, n_samp)`` shape input frame.
-        """
-
-    def setup(self):
-        pass
-
-    def reset(self):
-        pass
-
-    @property
-    def device(self):
-        return self._device
-
-    @device.setter
-    def device(self, device):
-        self._device = device
 
 
 class Distributor:

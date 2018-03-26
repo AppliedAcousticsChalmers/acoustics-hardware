@@ -2,13 +2,66 @@ import numpy as np
 from numpy.fft import rfft as fft, irfft as ifft
 from scipy.signal import waveforms, max_len_seq
 import queue
-from . import core, utils
+from . import utils
 
 
-class QGenerator(core.Generator):
+class Generator:
+    """Base class for generator implementations.
+
+    A `Generator` is an object that creates data for output channels in a
+    Device. Refer to specific generators for more details.
+    """
+    def __init__(self, device=None, **kwargs):
+        self.device = device
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def __call__(self):
+        """Manages frame creation"""
+        return np.atleast_2d(self.frame())
+
+    def frame(self):
+        """Generates a frame of output.
+
+        The generated frame must match the device framesize.
+        If the generator creates multiple channels, it should have the shape
+        ``(n_ch, framesize)``, otherwise 1d arrays are sufficient.
+
+        Returns:
+            `numpy.ndarray`: Generated frame.
+        """
+        raise NotImplementedError('Required method `frame` is not implemented in {}'.format(self.__class__.__name__))
+
+    def reset(self):
+        """Resets the generator."""
+        pass
+
+    def setup(self):
+        """Configures the generator state."""
+        pass
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, dev):
+        self._device = dev
+
+
+class GeneratorStop(Exception):
+    """Raised by Generators.
+
+    This exception indicates that the generator have reached some stopping
+    criteria, e.g. end of file. Should be caught by the Device to stop output.
+    """
+    pass
+
+
+class QGenerator(Generator):
     """Generator using `queue.Queue`.
 
-    Implementation of a `~.core.Generator` using a queue.
+    Implementation of a `Generator` using a queue.
     Takes data from an input queue and generates frames with the correct
     framesize. The input queue must be filled fast enough otherwise the
     device output is cancelled.
@@ -17,7 +70,7 @@ class QGenerator(core.Generator):
         Q (`~queue.Queue`): The queue from where data is extracted.
     """
     def __init__(self, **kwargs):
-        core.Generator.__init__(self, **kwargs)
+        Generator.__init__(self, **kwargs)
         self.Q = queue.Queue()
         self.buffer = None
 
@@ -31,7 +84,7 @@ class QGenerator(core.Generator):
             try:
                 frame = self.Q.get(timeout=self.device._generator_timeout)
             except queue.Empty:
-                raise core.GeneratorStop('Input Q is empty')
+                raise GeneratorStop('Input Q is empty')
             gen_frame.append(frame[..., :samples_left])
             samples_left -= frame.shape[-1]
         if samples_left < 0:
@@ -42,14 +95,14 @@ class QGenerator(core.Generator):
 
     def reset(self):
         """Clears the input queue."""
-        core.Generator.reset(self)
+        Generator.reset(self)
         utils.flush_Q(self.Q)
 
 
-class ArbitrarySignalGenerator(core.Generator):
+class ArbitrarySignalGenerator(Generator):
     """Repeated generation of arbritrary signals.
 
-    Implementation of `~.core.Generator` for arbritrary signals.
+    Implementation of `Generator` for arbritrary signals.
 
     Arguments:
         repetitions (`float`): The number of cycles to output before stopping, default `np.inf`.
@@ -58,13 +111,13 @@ class ArbitrarySignalGenerator(core.Generator):
         signal (`numpy.ndarray`): One cycle of the signal to output.
     """
     def __init__(self, repetitions=np.inf, **kwargs):
-        core.Generator.__init__(self, **kwargs)
+        Generator.__init__(self, **kwargs)
         self.repetitions = repetitions  # Default to continious output
         self.reset()
 
     def frame(self):
         if self.repetitions_done >= self.repetitions:
-            raise core.GeneratorStop('Finite number of repetitions reached')
+            raise GeneratorStop('Finite number of repetitions reached')
         samples_left = self.device.framesize
         gen_frame = []
         while samples_left > 0:
@@ -81,7 +134,7 @@ class ArbitrarySignalGenerator(core.Generator):
         return np.concatenate(gen_frame, axis=-1)
 
     def reset(self):
-        core.Generator.reset(self)
+        Generator.reset(self)
         self.signal = None
         self.idx = 0
         self.repetitions_done = 0
@@ -102,7 +155,7 @@ class ArbitrarySignalGenerator(core.Generator):
         Note:
             Call `ArbitrarySignalGenerator.setup(self)` from subclasses.
         """
-        core.Generator.setup(self)
+        Generator.setup(self)
 
 
 class SweepGenerator(ArbitrarySignalGenerator):
@@ -157,10 +210,10 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
         self.signal = 1 - 2 * self.sequence
 
 
-class FunctionGenerator(core.Generator):
+class FunctionGenerator(Generator):
     """Generates signals from a shape function.
 
-    Implementation of `~.core.Generator` for standard funcitons.
+    Implementation of `Generator` for standard funcitons.
 
     Arguments:
         frequency (`float`): The frequecy of the signal, in Hz.
@@ -184,7 +237,7 @@ class FunctionGenerator(core.Generator):
 
     def __init__(self, frequency, amplitude=1, repetitions=np.inf,
                  shape='sine', phase_offset=0, shape_kwargs=None, **kwargs):
-        core.Generator.__init__(self, **kwargs)
+        Generator.__init__(self, **kwargs)
         self.repetitions = repetitions  # Default to continious output
         self.frequency = frequency
         self.amplitude = amplitude
@@ -194,7 +247,7 @@ class FunctionGenerator(core.Generator):
 
     def frame(self):
         if self.repetitions_done >= self.repetitions:
-            raise core.GeneratorStop('Finite number of repetitions reached')
+            raise GeneratorStop('Finite number of repetitions reached')
         frame = self._function(self._phase_array + self._phase, **self.shape_kwargs)
         self._phase += self._phase_per_frame
         if self.repetitions_done >= self.repetitions:
@@ -204,14 +257,14 @@ class FunctionGenerator(core.Generator):
         return self.amplitude * frame
 
     def setup(self):
-        core.Generator.setup(self)
+        Generator.setup(self)
         self.reset()
         taps = np.arange(self.device.framesize)
         self._phase_array = 2 * np.pi * taps * self.frequency / self.device.fs
         self._phase_per_frame = 2 * np.pi * self.frequency / self.device.fs * self.device.framesize
 
     def reset(self):
-        core.Generator.reset(self)
+        Generator.reset(self)
         self._phase = self.phase_offset
 
     @property
@@ -231,10 +284,10 @@ class FunctionGenerator(core.Generator):
         return self._phase / (2 * np.pi)
 
 
-class NoiseGenerator(core.Generator):
+class NoiseGenerator(Generator):
     """Generates colored noise.
 
-    Implementation of `~.core.Generator` for random noise signals.
+    Implementation of `Generator` for random noise signals.
 
     Arguments:
         color (`str`, optional): The color of the noise. Each color corresponds
@@ -272,7 +325,7 @@ class NoiseGenerator(core.Generator):
 
     def __init__(self, color='white', method='autoregressive',
                  ar_order=63, **kwargs):
-        core.Generator.__init__(self, **kwargs)
+        Generator.__init__(self, **kwargs)
         self.method = method
         self.ar_order = 63
         self.color = color
@@ -330,11 +383,11 @@ class NoiseGenerator(core.Generator):
         return self._call_methods[self.method](self)
 
     def setup(self):
-        core.Generator.setup(self)
+        Generator.setup(self)
         self._setup_methods[self.method](self)
 
     def reset(self):
-        core.Generator.reset(self)
+        Generator.reset(self)
         self._reset_methods[self.method](self)
 
     @property
