@@ -674,8 +674,10 @@ class Generator:
     A `Generator` is an object that creates data for output channels in a
     `Device`. Refer to specific generators for more details.
     """
-    def __init__(self, device=None):
+    def __init__(self, device=None, **kwargs):
         self.device = device
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def __call__(self):
         """Manages frame creation"""
@@ -724,8 +726,10 @@ class Processor:
 
     A processor is an object that manipulates the data in some way.
     """
-    def __init__(self, device=None):
+    def __init__(self, device=None, **kwargs):
         self.device = device
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def __call__(self, frame):
         return self.process(frame)
@@ -762,8 +766,10 @@ class Distributor:
     `Device`, e.g. a plotter or a file writer. Refer to specific implementations
     for more details.
     """
-    def __init__(self, device=None):
+    def __init__(self, device=None, **kwargs):
         self.device = device
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def reset(self):
         """Resets the distributor"""

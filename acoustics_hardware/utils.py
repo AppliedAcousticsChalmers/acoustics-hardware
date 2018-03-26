@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.signal import lfilter
 import queue
+from . import core
 
 
 def flush_Q(q):
@@ -21,24 +22,29 @@ def concatenate_Q(q):
     return np.concatenate(data_list, axis=-1)
 
 
-class LevelDetector:
+class LevelDetector(core.Processor):
+    """Single channel level detector.
+
+    A level detector that tracks the root-mean-square level in a signal.
+    The level is tracked with an exponentially decaying time average,
+    implemented as a low-passed squared amplitude.
+
+    Arguments:
+        channel (`int`): The index of the channel to track.
+        time_constant (`float`): Time constant for the exponential decay in
+            seconds, default 50 ms.
+        **kwargs: Extra arguments will be passed to `~.core.Processor`.
     """
-    Todo:
-        - Document properly!
-        - Should this class have device awareness the same way as a Trigger?
-            That would solve some initialisations, e.g. ``fs``.
-        - Multichannel detector?
-    """
-    def __init__(self, channel, fs, time_constant=50e-3):
-        self.fs = fs
+    def __init__(self, channel, time_constant=50e-3, **kwargs):
+        core.Processor.__init__(self, **kwargs)
         self.time_constant = time_constant
 
         self.channel = channel
         self.reset()
 
-    def __call__(self, block):
+    def process(self, frame):
         # Squared input level is tracked in order for the RMS trigger to work properly.
-        input_levels = block[self.channel]**2
+        input_levels = frame[self.channel]**2
         output_levels, self._buffer = lfilter([self._digital_constant], [1, self._digital_constant - 1], input_levels, zi=self._buffer)
         return output_levels**0.5
 
@@ -47,11 +53,11 @@ class LevelDetector:
 
     @property
     def time_constant(self):
-        return -1 / (np.log(1 - self._digital_constant) * self.fs)
+        return -1 / (np.log(1 - self._digital_constant) * self.device.fs)
 
     @time_constant.setter
     def time_constant(self, val):
-        self._digital_constant = 1 - np.exp(-1 / (val * self.fs))
+        self._digital_constant = 1 - np.exp(-1 / (val * self.device.fs))
 
     @property
     def current_level(self):

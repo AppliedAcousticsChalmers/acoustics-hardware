@@ -16,8 +16,8 @@ class QGenerator(core.Generator):
     Attributes:
         Q (`~queue.Queue`): The queue from where data is extracted.
     """
-    def __init__(self):
-        core.Generator.__init__(self)
+    def __init__(self, **kwargs):
+        core.Generator.__init__(self, **kwargs)
         self.Q = queue.Queue()
         self.buffer = None
 
@@ -58,9 +58,8 @@ class ArbitrarySignalGenerator(core.Generator):
         signal (`numpy.ndarray`): One cycle of the signal to output.
     """
     def __init__(self, repetitions=np.inf, **kwargs):
-        core.Generator.__init__(self)
+        core.Generator.__init__(self, **kwargs)
         self.repetitions = repetitions  # Default to continious output
-        self.kwargs = kwargs
         self.reset()
 
     def frame(self):
@@ -98,14 +97,12 @@ class ArbitrarySignalGenerator(core.Generator):
         ``self.signal``. Access the underlying device as ``self.device``,
         which has important properties, e.g. samplerate ``fs``.
         All keyword arguments passed while creating instances are available
-        as ``self.kwargs``.
+        as ``self.key``.
 
         Note:
             Call `ArbitrarySignalGenerator.setup(self)` from subclasses.
         """
         core.Generator.setup(self)
-        if 'signal' in self.kwargs:
-            self.signal = self.kwargs['signal']
 
 
 class SweepGenerator(ArbitrarySignalGenerator):
@@ -123,7 +120,8 @@ class SweepGenerator(ArbitrarySignalGenerator):
     See Also:
         `ArbitrarySignalGenerator`, `scipy.signal.chirp`
     """
-    def __init__(self, start_frequency, stop_frequency, duration, method='logarithmic', bidirectional=False, **kwargs):
+    def __init__(self, start_frequency, stop_frequency, duration,
+                 method='logarithmic', bidirectional=False, **kwargs):
         ArbitrarySignalGenerator.__init__(self, **kwargs)
         self.start_frequency = start_frequency
         self.stop_frequency = stop_frequency
@@ -176,7 +174,7 @@ class FunctionGenerator(core.Generator):
                 - ``'square'``: `scipy.signal.square`
 
         phase_offset (`float`, optional): Phase offset of the signal in radians, default 0.
-        **kwargs: Other keyword arguments will be passed to the shape function.
+        shape_kwargs (`dict`): Keyword arguments for shape function.
     """
     _functions = {
         'sin': waveforms.sin,
@@ -184,19 +182,20 @@ class FunctionGenerator(core.Generator):
         'squ': waveforms.square
     }
 
-    def __init__(self, frequency, amplitude=1, repetitions=np.inf, shape='sine', phase_offset=0, **kwargs):
-        core.Generator.__init__(self)
+    def __init__(self, frequency, amplitude=1, repetitions=np.inf,
+                 shape='sine', phase_offset=0, shape_kwargs=None, **kwargs):
+        core.Generator.__init__(self, **kwargs)
         self.repetitions = repetitions  # Default to continious output
-        self.kwargs = kwargs
         self.frequency = frequency
         self.amplitude = amplitude
         self.shape = shape
         self.phase_offset = phase_offset
+        self.shape_kwargs = {} if shape_kwargs is None else shape_kwargs
 
     def frame(self):
         if self.repetitions_done >= self.repetitions:
             raise core.GeneratorStop('Finite number of repetitions reached')
-        frame = self._function(self._phase_array + self._phase, **self.kwargs)
+        frame = self._function(self._phase_array + self._phase, **self.shape_kwargs)
         self._phase += self._phase_per_frame
         if self.repetitions_done >= self.repetitions:
             surplus_reps = self.repetitions_done - self.repetitions
@@ -247,12 +246,13 @@ class NoiseGenerator(core.Generator):
             - ``'white'``: 0
             - ``'pink'``: 1
             - ``'brown'``: 2
-        method (`str`, optional): The method used to create the noise.
+        method (`str`): The method used to create the noise.
             Currently two methods are implemented, a ``'fft'`` method and
             an ``'autoregressive'`` method. The default is ``'autoregressive'``.
             The autoregressive method is more expensive for small framesizes,
             but gives the same performance regardless of the framesize. The
             fft method have bad low-frequency performance for small framesizes.
+        ar_order (`int`): The order for the autoregressive method, default 63.
     References:
         N. J. Kasdin, “Discrete simulation of colored noise and stochastic
         processes and 1/f^α power law noise generation,” Proceedings of the
@@ -270,11 +270,12 @@ class NoiseGenerator(core.Generator):
         'brown': 2
     }
 
-    def __init__(self, color='white', method='autoregressive', **kwargs):
-        core.Generator.__init__(self)
-        self.color = color
+    def __init__(self, color='white', method='autoregressive',
+                 ar_order=63, **kwargs):
+        core.Generator.__init__(self, **kwargs)
         self.method = method
-        self.method_args = kwargs
+        self.ar_order = 63
+        self.color = color
 
     def _fft_noise(self):
         normal = np.random.normal(size=self.device.framesize)
@@ -299,11 +300,10 @@ class NoiseGenerator(core.Generator):
         return shaped
 
     def _ar_setup(self):
-        order = self.method_args.get('order', 63)
-        self._ar_buffer = np.zeros(order - 1)
-        coefficients = np.zeros(order)
+        self._ar_buffer = np.zeros(self.ar_order - 1)
+        coefficients = np.zeros(self.ar_order)
         coefficients[0] = 1
-        for k in range(1, order):
+        for k in range(1, self.ar_order):
             coefficients[k] = (k - 1 - self.power / 2) * coefficients[k - 1] / k
         self._ar_coefficients = coefficients[1:]
 

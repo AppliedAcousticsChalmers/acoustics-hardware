@@ -32,7 +32,7 @@ class RMSTrigger(core.Trigger):
 
     def setup(self):
         core.Trigger.setup(self)
-        self.level_detector = utils.LevelDetector(channel=self.channel, fs=self.device.fs, **self.level_detector_args)
+        self.level_detector = utils.LevelDetector(channel=self.channel, device=self.device, **self.level_detector_args)
 
     def test(self, frame):
         # logger.debug('Testing in RMS trigger')
