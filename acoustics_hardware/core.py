@@ -213,10 +213,10 @@ class Device:
     def _register_input_Q(self, Q=None):
         """Registers new input Q.
 
-        This should be used to register a queue used by a `Distributor`. The
+        This should be used to register a queue used by a Distributor. The
         queue will receive frames read while the input is active.
         For memory efficiency the input frames are not copied to individual
-        queues, so in-place operations are not safe. If a `Distributor` needs
+        queues, so in-place operations are not safe. If a Distributor needs
         to manipulate the data a copy should be made before manipulation.
 
         Arguments:
@@ -242,8 +242,8 @@ class Device:
         """Unregisters input Q.
 
         Removes a queue from the list of queues that receive input data.
-        This method should be used by a `Distributor` if it is removed from
-        the `Device`.
+        This method should be used by a Distributor if it is removed from
+        the Device.
 
         Arguments:
             Q (`~queue.Queue`): The Q to remove.
@@ -256,10 +256,10 @@ class Device:
             self.__Qs.remove(Q)
 
     def add_distributor(self, distributor):
-        """Adds a `Distributor` to the `Device`.
+        """Adds a Distributor to the Device.
 
         Arguments:
-            distributor (`Distributor`): The distributor to add.
+            distributor: The distributor to add.
         Todo:
             Give a warning instead of an error while running.
         """
@@ -270,10 +270,10 @@ class Device:
             distributor.device = self
 
     def remove_distributor(self, distributor):
-        """Removes a `Distributor` from the `Device`.
+        """Removes a Distributor from the Device.
 
         Arguments:
-            distributor (`Distributor`): The distributor to remove.
+            distributor: The distributor to remove.
         Todo:
             Give a warning instead of an error while running.
         """
@@ -565,32 +565,3 @@ class Channel(int):
         calib_str = '' if self.calibration is None else ' ({:.4g} {})'.format(self.calibration, self.unit)
         ch_str = '{chtype} channel {index}'.format(chtype=self.chtype, index=self.index).capitalize()
         return '{ch}{label}{calib}'.format(ch=ch_str, label=label_str, calib=calib_str)
-
-
-class Distributor:
-    """Base class for Distributors.
-
-    A `Distributor` is an object that should receive the input data from a
-    `Device`, e.g. a plotter or a file writer. Refer to specific implementations
-    for more details.
-    """
-    def __init__(self, device=None, **kwargs):
-        self.device = device
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-    def reset(self):
-        """Resets the distributor"""
-        pass
-
-    def setup(self):
-        """Configures the distributor state"""
-        pass
-
-    @property
-    def device(self):
-        return self._device
-
-    @device.setter
-    def device(self, dev):
-        self._device = dev

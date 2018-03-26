@@ -4,11 +4,55 @@ import numpy as np
 import multiprocessing
 import threading
 import queue
-from . import core
 
 
-class HDFWriter(core.Distributor):
-    """ Implements writing to HDF 5 files """
+class Distributor:
+    """Base class for Distributors.
+
+    A `Distributor` is an object that should receive the input data from a
+    Device, e.g. a plotter or a file writer. Refer to specific implementations
+    for more details.
+    """
+    def __init__(self, device=None, **kwargs):
+        self.device = device
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def reset(self):
+        """Resets the distributor"""
+        pass
+
+    def setup(self):
+        """Configures the distributor state"""
+        pass
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, dev):
+        self._device = dev
+
+
+class HDFWriter(Distributor):
+    """ Implements writing to an HDF 5 file.
+
+    Hiearchial Data Format (HDF) 5 is a format suitable for multidimentional
+    data. The format supports arbritrary metadata tags, and datasets can be
+    organized in a folder-like structure within a single file.
+
+    Fileaccess is restricted to a single writer to maintain file integrity.
+    A single writer can be be used to write data with multiple devices at the
+    same time by using different datasets.
+
+    HDFWriter supports three different file writing modes, see `start`.
+
+    Arguments:
+        name (`str`): The path to the file to write to.
+    Note:
+        Only create a single HDFWriter per file!
+    """
     _timeout = 0.1
 
     def __init__(self, filename=None):
@@ -40,6 +84,16 @@ class HDFWriter(core.Distributor):
         self.add_input(device=device)
 
     def add_input(self, device=None, Q=None):
+        """Adds a new device or queue.
+
+        At least one of ``device`` or ``Q`` must be given. If ``device`` is
+        ``None`` or a string the queue will be treated as an deviceless queue.
+        If ``Q`` is not given it will be created and registred to the device.
+
+        Arguments:
+            device: A device which reads data.
+            Q: A queue with data to write.
+        """
         if device is None and Q is None:
             raise ValueError('Either `device` or `Q` must be given as input')
         if Q is None:
@@ -52,6 +106,25 @@ class HDFWriter(core.Distributor):
             self.start()
 
     def start(self, mode='auto', use_process=True):
+        """Starts the file writer.
+
+        The file writer will be started in one of three modes with different
+        level of user controll.
+
+        Mode: ``'auto'``
+            The auto mode doc
+        Mode: ``'signal'``
+            The signal mode doc
+        Mode: ``'manual'``
+            The manual mode doc
+
+        Arguments:
+            mode (`str`): The mode to start in.
+            use_process (`bool`): If writing should be managed in a separate
+                process. This is recommended, and enabled by default, since
+                file access with `h5py` will block all other threads. If set
+                to false, file writing will instead be managed in a thread.
+        """
         self.mode = mode
         if use_process:
             self._process = multiprocessing.Process(target=self._write_target)
