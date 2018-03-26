@@ -10,7 +10,7 @@ for line in open('acoustics_hardware/__init__.py'):
 setup(name='acoustics-hardware',
       version=__version__,
       description='Controlling hardware used in acoustic measurement systems',
-      long_description=open('README.RST').read(),
+      long_description=open('README.rst').read(),
       url='https://github.com/CarlAndersson/acoustics-hardware',
       author='Carl Andersson',
       author_email='carl.andersson@chalmers.se',
