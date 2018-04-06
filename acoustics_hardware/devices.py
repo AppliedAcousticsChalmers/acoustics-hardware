@@ -60,6 +60,9 @@ class AudioDevice(core.Device):
         self.outputs = []
 
     def _hardware_run(self):
+        while sd._initialized > 0:
+            sd._terminate()
+        sd._initialize()
         # Create streams
         num_output_ch = max(self.outputs, default=-1) + 1
         num_input_ch = max(self.inputs, default=-1) + 1
