@@ -135,7 +135,6 @@ class ArbitrarySignalGenerator(Generator):
 
     def reset(self):
         Generator.reset(self)
-        self.signal = None
         self.idx = 0
         self.repetitions_done = 0
 

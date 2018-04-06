@@ -96,7 +96,7 @@ class Device:
             index (`int`): Zero-based index of the channel.
             **kwargs: All arguments of `Channel` except ``chtype`` and ``index``.
         """
-        if index not in self.outpts and index < self.max_outputs:
+        if index not in self.outputs and index < self.max_outputs:
             self.outputs.append(Channel(index, 'output', **kwargs))
 
     @property
