@@ -7,7 +7,7 @@ try:
     import nidaqmx
     import nidaqmx.stream_readers
     import nidaqmx.stream_writers
-except ModuleNotFoundError:
+except ImportError:
     pass
 
 
