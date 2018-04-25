@@ -85,9 +85,10 @@ class Trigger:
     def setup(self):
         """Configures trigger state."""
         if self.use_calibrations:
-            self.calibrations = self.device.calibrations
+            calibrations = self.device.calibrations
         else:
-            self.calibrations = np.ones(len(self.device.inputs))
+            calibrations = np.ones(len(self.device.inputs))
+        self.calibrations = calibrations[:, np.newaxis]
 
     @property
     def auto_deactivate(self):
