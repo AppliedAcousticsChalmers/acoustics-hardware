@@ -7,4 +7,4 @@ The purpose of this package is twofold, both to enable cross-hardware interactio
 Documentation:
     http://acoustics-hardware.readthedocs.io/
 Source code and issue tracker:
-    https://github.com/CarlAndersson/acoustics-hardware
+    https://github.com/AppliedAcousticsChalmers/acoustics-hardware
