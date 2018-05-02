@@ -6,6 +6,7 @@ import numpy as np
 from . import utils
 import json
 from .generators import GeneratorStop
+from .processors import LevelDetector
 
 
 class Device:
@@ -201,7 +202,7 @@ class Device:
             - Average over multiple parts
             - Determine a reasonable value of the averaging coefficient
         """
-        detector = utils.LevelDetector(channel=channel, fs=self.fs, time_constant=12/frequency)
+        detector = LevelDetector(device=self, channel=channel, time_constant=12/frequency)
         timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
         self.__triggers.append(detector)
         timer.start()
