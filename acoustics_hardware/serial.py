@@ -3,7 +3,7 @@ from serial import Serial
 import schunk
 
 
-class SerialGenerator:  # (Thread):
+class SerialDevice:
     @staticmethod
     def get_devices(name=None):
         from serial.tools.list_ports import comports
@@ -24,6 +24,21 @@ class SerialGenerator:  # (Thread):
             if dev.description.lower().find(name.lower()) >= 0:
                 return dev.device
 
+    def __del__(self):
+        self.ser.close()
+
+    def _write(self, *commands):
+        '''
+        Wrapper for writing to connected device
+        '''
+        for command in commands:
+            self.ser.write(bytes(command + '\n', 'UTF-8'))
+
+    def _read(self):
+        return self.ser.readline().decode()[:-2]
+
+
+class SerialGenerator(SerialDevice):
     def __init__(self, name, frequency=1e3, amplitude=1, output_unit='rms', shape='sine',
                  sweeps=0, sweep_time=1, sweep_start=100, sweep_stop=1e3, sweep_spacing='log'):
         # Thread.__init__(self)
@@ -45,19 +60,6 @@ class SerialGenerator:  # (Thread):
             'stop': None,
             'spacing': None
         }
-
-    def __del__(self):
-        self.ser.close()
-
-    def _write(self, *commands):
-        '''
-        Wrapper for writing to connected device
-        '''
-        for command in commands:
-            self.ser.write(bytes(command + '\n', 'UTF-8'))
-
-    def _read(self):
-        return self.ser.readline().decode()[:-2]
 
     def check_errors(self):
         errors = []
@@ -140,7 +142,7 @@ class SerialGenerator:  # (Thread):
             self._shape = 'dc'
 
 
-class VariSphere:
+class VariSphere(SerialDevice):
     def __init__(self, az_port='COM1', el_port='COM2'):
         self.az = schunk.Module(schunk.SerialConnection(
             0x0B, Serial, port=az_port, baudrate=9600, timeout=1))
