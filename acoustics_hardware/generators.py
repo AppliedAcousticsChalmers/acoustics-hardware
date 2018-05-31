@@ -10,15 +10,19 @@ class Generator:
 
     A `Generator` is an object that creates data for output channels in a
     Device. Refer to specific generators for more details.
+
+    Attributes:
+        amplitude (`float`): The amplitude scale of the generator.
     """
-    def __init__(self, device=None, **kwargs):
+    def __init__(self, device=None, amplitude=1, **kwargs):
         self.device = device
+        self.amplitude = amplitude
         for key, value in kwargs.items():
             setattr(self, key, value)
 
     def __call__(self):
         """Manages frame creation"""
-        return np.atleast_2d(self.frame())
+        return self.amplitude * np.atleast_2d(self.frame())
 
     def frame(self):
         """Generates a frame of output.
@@ -216,7 +220,6 @@ class FunctionGenerator(Generator):
 
     Arguments:
         frequency (`float`): The frequecy of the signal, in Hz.
-        amplitude (`float`, optional): The amplitude of the signal, default to 1.
         repetitions (`float`, optional): The number of repetitions, default `np.inf`.
         shape (`str`, optional): Function shape, default ``'sine'``. Currently
             available functions are
@@ -234,12 +237,11 @@ class FunctionGenerator(Generator):
         'squ': waveforms.square
     }
 
-    def __init__(self, frequency, amplitude=1, repetitions=np.inf,
+    def __init__(self, frequency, repetitions=np.inf,
                  shape='sine', phase_offset=0, shape_kwargs=None, **kwargs):
         Generator.__init__(self, **kwargs)
         self.repetitions = repetitions  # Default to continious output
         self.frequency = frequency
-        self.amplitude = amplitude
         self.shape = shape
         self.phase_offset = phase_offset
         self.shape_kwargs = {} if shape_kwargs is None else shape_kwargs
@@ -253,7 +255,7 @@ class FunctionGenerator(Generator):
             surplus_reps = self.repetitions_done - self.repetitions
             surplus_samps = round(surplus_reps * self.device.fs / self.frequency)
             frame[-surplus_samps:] = 0
-        return self.amplitude * frame
+        return frame
 
     def setup(self):
         Generator.setup(self)
