@@ -74,7 +74,7 @@ class QGenerator(Generator):
         Q (`~queue.Queue`): The queue from where data is extracted.
     """
     def __init__(self, **kwargs):
-        Generator.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.Q = queue.Queue()
         self.buffer = None
 
@@ -99,7 +99,7 @@ class QGenerator(Generator):
 
     def reset(self):
         """Clears the input queue."""
-        Generator.reset(self)
+        super().reset()
         utils.flush_Q(self.Q)
 
 
@@ -115,7 +115,7 @@ class ArbitrarySignalGenerator(Generator):
         signal (`numpy.ndarray`): One cycle of the signal to output.
     """
     def __init__(self, repetitions=np.inf, **kwargs):
-        Generator.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.repetitions = repetitions  # Default to continious output
         self.reset()
 
@@ -138,7 +138,7 @@ class ArbitrarySignalGenerator(Generator):
         return np.concatenate(gen_frame, axis=-1)
 
     def reset(self):
-        Generator.reset(self)
+        super().reset()
         self.idx = 0
         self.repetitions_done = 0
 
@@ -158,7 +158,7 @@ class ArbitrarySignalGenerator(Generator):
         Note:
             Call `ArbitrarySignalGenerator.setup(self)` from subclasses.
         """
-        Generator.setup(self)
+        super().setup()
 
 
 class SweepGenerator(ArbitrarySignalGenerator):
@@ -178,7 +178,7 @@ class SweepGenerator(ArbitrarySignalGenerator):
     """
     def __init__(self, start_frequency, stop_frequency, duration,
                  method='logarithmic', bidirectional=False, **kwargs):
-        ArbitrarySignalGenerator.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.start_frequency = start_frequency
         self.stop_frequency = stop_frequency
         self.duration = duration
@@ -186,7 +186,7 @@ class SweepGenerator(ArbitrarySignalGenerator):
         self.bidirectional = bidirectional
 
     def setup(self):
-        ArbitrarySignalGenerator.setup(self)
+        super().setup()
         time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
         self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
         if self.bidirectional:
@@ -204,11 +204,11 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
         `ArbitrarySignalGenerator`, `scipy.signal.max_len_seq`
     """
     def __init__(self, order, **kwargs):
-        ArbitrarySignalGenerator.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.order = order
 
     def setup(self):
-        ArbitrarySignalGenerator.setup(self)
+        super().setup()
         self.sequence, state = max_len_seq(self.order)
         self.signal = 1 - 2 * self.sequence
 
@@ -239,7 +239,7 @@ class FunctionGenerator(Generator):
 
     def __init__(self, frequency, repetitions=np.inf,
                  shape='sine', phase_offset=0, shape_kwargs=None, **kwargs):
-        Generator.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.repetitions = repetitions  # Default to continious output
         self.frequency = frequency
         self.shape = shape
@@ -258,14 +258,14 @@ class FunctionGenerator(Generator):
         return frame
 
     def setup(self):
-        Generator.setup(self)
+        super().setup()
         self.reset()
         taps = np.arange(self.device.framesize)
         self._phase_array = 2 * np.pi * taps * self.frequency / self.device.fs
         self._phase_per_frame = 2 * np.pi * self.frequency / self.device.fs * self.device.framesize
 
     def reset(self):
-        Generator.reset(self)
+        super().reset()
         self._phase = self.phase_offset
 
     @property
@@ -326,7 +326,7 @@ class NoiseGenerator(Generator):
 
     def __init__(self, color='white', method='autoregressive',
                  ar_order=63, **kwargs):
-        Generator.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.method = method
         self.ar_order = 63
         self.color = color
@@ -384,11 +384,11 @@ class NoiseGenerator(Generator):
         return self._call_methods[self.method](self)
 
     def setup(self):
-        Generator.setup(self)
+        super().setup()
         self._setup_methods[self.method](self)
 
     def reset(self):
-        Generator.reset(self)
+        super().reset()
         self._reset_methods[self.method](self)
 
     @property

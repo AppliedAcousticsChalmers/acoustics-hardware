@@ -54,7 +54,7 @@ class LevelDetector(Processor):
         **kwargs: Extra arguments will be passed to `Processor`.
     """
     def __init__(self, channel, time_constant=50e-3, **kwargs):
-        Processor.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.time_constant = time_constant
 
         self.channel = channel
@@ -67,6 +67,7 @@ class LevelDetector(Processor):
         return output_levels**0.5
 
     def reset(self):
+        super().reset()
         self._buffer = np.atleast_1d(0)
 
     @property

@@ -39,8 +39,8 @@ class AudioDevice(core.Device):
         else:
             return sd.query_devices(name)['name']
 
-    def __init__(self, name=None, fs=None, framesize=None):
-        core.Device.__init__(self)
+    def __init__(self, name=None, fs=None, framesize=None, **kwargs):
+        super().__init__(**kwargs)
         if name is None:
             self.name = AudioDevice.get_devices()[0]['name']
         else:
@@ -154,8 +154,8 @@ class NIDevice(core.Device):
                 name = [x for x in name_list if x[:8] == name[:5] + 'Mod'][0]
             return name
 
-    def __init__(self, name=None, fs=None, framesize=10000, dtype='float64'):
-        core.Device.__init__(self)
+    def __init__(self, name=None, fs=None, framesize=10000, dtype='float64', **kwargs):
+        super().__init__(**kwargs)
         if name is None:
             name = NIDevice.get_devices()[0]
         self.name = NIDevice.get_devices(name)

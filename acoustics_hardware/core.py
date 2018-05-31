@@ -33,7 +33,7 @@ class Device:
     _q_timeout = 1
     _hardware_timeout = 1
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         # self.input_active = multiprocessing.Event()
         self.input_active = threading.Event()
         # self.output_active = multiprocessing.Event()

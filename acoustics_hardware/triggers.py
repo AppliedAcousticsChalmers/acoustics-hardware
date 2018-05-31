@@ -126,7 +126,7 @@ class RMSTrigger(Trigger):
         **kwargs: Extra keyword arguments passed to `Trigger`.
     """
     def __init__(self, level, channel, region='Above', level_detector_args=None, **kwargs):
-        Trigger.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.channel = channel
         # self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
         self.region = region
@@ -134,7 +134,7 @@ class RMSTrigger(Trigger):
         self.level_detector_args = level_detector_args if level_detector_args is not None else {}
 
     def setup(self):
-        Trigger.setup(self)
+        super().setup()
         self.level_detector = processors.LevelDetector(channel=self.channel, device=self.device, **self.level_detector_args)
 
     def test(self, frame):
@@ -143,7 +143,7 @@ class RMSTrigger(Trigger):
         return any(self._sign * levels > self.trigger_level * self._sign)
 
     def reset(self):
-        Trigger.reset(self)
+        super().reset()
         self.level_detector.reset()
 
     @property
@@ -177,7 +177,7 @@ class PeakTrigger(Trigger):
         **kwargs: Extra keyword arguments passed to `Trigger`.
     """
     def __init__(self, level, channel, region='Above', **kwargs):
-        Trigger.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.region = region
         self.trigger_level = level
         self.channel = channel

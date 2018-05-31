@@ -55,7 +55,8 @@ class HDFWriter(Distributor):
     """
     _timeout = 0.1
 
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, **kwargs):
+        super().__init__(**kwargs)
         if filename is None:
             filename = 'data'  # Default filename
 
@@ -102,6 +103,7 @@ class HDFWriter(Distributor):
         self._input_Qs.append(Q)
 
     def setup(self):
+        super().setup()
         if not self._started:
             self.start()
 
