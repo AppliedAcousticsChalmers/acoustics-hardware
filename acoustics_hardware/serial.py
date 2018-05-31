@@ -10,14 +10,14 @@ class SerialGenerator:  # (Thread):
         devs = comports()
         # No input given, return the list of all connected devices
         if name is None:
-            return devs
+            return [dev.device for dev in devs]
         # No name given, return first connected port
         # This is probably never what you want, but we can do nothing about it here
         if len(name) == 0:
             return devs[0].device
         # Try name as a port name
         for dev in devs:
-            if dev.device.lower() == name.lower():
+            if dev.device.lower().find(name.lower()) >= 0:
                 return dev.device
         # Try name as a serial device name
         for dev in devs:
