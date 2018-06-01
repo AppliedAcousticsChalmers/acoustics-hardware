@@ -24,6 +24,12 @@ class SerialDevice:
             if dev.description.lower().find(name.lower()) >= 0:
                 return dev.device
 
+    def __init__(self, name=None, **kwargs):
+        if name is not None:
+            kwargs.setdefault('port', SerialDevice.get_devices(name))
+        kwargs.setdefault('timeout', 1)
+        self.ser = Serial(**kwargs)
+
     def __del__(self):
         self.ser.close()
 
@@ -35,15 +41,14 @@ class SerialDevice:
             self.ser.write(bytes(command + '\n', 'UTF-8'))
 
     def _read(self):
-        return self.ser.readline().decode()[:-2]
+        return self.ser.readline().decode().split('\n')[0]
 
 
 class SerialGenerator(SerialDevice):
     def __init__(self, name, frequency=1e3, amplitude=1, output_unit='rms', shape='sine',
-                 sweeps=0, sweep_time=1, sweep_start=100, sweep_stop=1e3, sweep_spacing='log'):
-        # Thread.__init__(self)
-        self.device = SerialGenerator.get_devices(name)
-        self.ser = Serial(port=self.device, timeout=1, dsrdtr=True)
+                 sweeps=0, sweep_time=1, sweep_start=100, sweep_stop=1e3, sweep_spacing='log', **kwargs):
+        kwargs.setdefault('dsrdtr', True)
+        super().__init__(name=name, **kwargs)
         self._write('system:remote', 'output:load inf')
         self.output_unit = output_unit
         self.amplitude = amplitude
@@ -144,6 +149,7 @@ class SerialGenerator(SerialDevice):
 
 class VariSphere(SerialDevice):
     def __init__(self, az_port='COM1', el_port='COM2'):
+        super().__init__()
         self.az = schunk.Module(schunk.SerialConnection(
             0x0B, Serial, port=az_port, baudrate=9600, timeout=1))
         self.el = schunk.Module(schunk.SerialConnection(
