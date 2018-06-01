@@ -1,4 +1,4 @@
-# from threading import Thread, Event
+import numpy as np
 from serial import Serial
 import schunk
 
@@ -42,6 +42,63 @@ class SerialDevice:
 
     def _read(self):
         return self.ser.readline().decode().split('\n')[0]
+
+
+class GCodeMotion(SerialDevice):
+    def __init__(self, name, size=None, **kwargs):
+        kwargs.setdefault('baudrate', 115200)
+        super().__init__(name=name, **kwargs)
+        self.offsets = np.array([0, 0, 0])
+        self.size = np.array([np.inf, np.inf, np.inf]) if size is None else np.asarray(size)
+        self._write('G21', 'G90')  # Sets units to mm, absolute coordinates
+        self.ser.reset_input_buffer()
+        self._write('G0')  # The first command is sometimes ignored
+
+    def move(self, x=None, y=None, z=None, speed=None):
+        x0, y0, z0 = self.offsets
+        xmax, ymax, zmax = self.size
+        x_comm = '' if x is None else ' X{:3.3f}'.format(xmax if x + x0 > xmax else 0 if x + x0 < 0 else x + x0)
+        y_comm = '' if y is None else ' Y{:3.3f}'.format(ymax if y + y0 > ymax else 0 if y + y0 < 0 else y + y0)
+        z_comm = '' if z is None else ' Z{:3.3f}'.format(zmax if z + z0 > zmax else 0 if z + z0 < 0 else z + z0)
+        spd_comm = '' if speed is None else ' F{:3.3f}'.format(speed * 60)
+        command = 'G0' + x_comm + y_comm + z_comm + spd_comm
+        self._write(command)
+
+    def home_axis(self, *args):
+        command = 'G28'
+        for ax in args:
+            command = command + ' ' + ax.upper()
+        self._write(command)
+
+    def set_origin(self):
+        self.offsets = self.absolute_position
+
+    @property
+    def absolute_position(self):
+        self._write('M114')
+        response = self._read()
+        self._read()
+        xidx = response.find('X:')
+        yidx = response.find('Y:')
+        zidx = response.find('Z:')
+        eidx = response.find('E:')
+        x = float(response[xidx + 2:yidx])
+        y = float(response[yidx + 2:zidx])
+        z = float(response[zidx + 2:eidx])
+        return np.array([x, y, z])
+
+    @property
+    def position(self):
+        return self.absolute_position - self.offsets
+
+    def halt(self):
+        self._write('M112')
+
+    def _read(self):
+        while True:
+            line = super()._read()
+            if line != 'ok':
+                return line
 
 
 class SerialGenerator(SerialDevice):
