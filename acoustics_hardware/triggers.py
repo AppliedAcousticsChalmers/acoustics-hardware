@@ -214,16 +214,21 @@ class DelayedAction:
     Arguments:
         action (callable): Any callable action. This can be a callable class,
             a user defined funciton, or a method of another class.
-            If several actions are required, create a lambda that calls all
-            actions when called.
+            If several actions are required, pass an iterable of callables.
         time (`float`): The delay time, in seconds.
     """
+
     def __init__(self, action, time):
-        self.action = action
+        actions = []
+        try:
+            actions.extend(action)
+        except TypeError:
+            actions.append(action)
+        self.actions = actions
         self.time = time
         # self.timer = Timer(interval=time, function=action)
 
     def __call__(self):
-        timer = threading.Timer(interval=self.time, function=self.action)
+        timer = threading.Timer(interval=self.time, function=lambda: [action() for action in self.actions])
         timer.start()
         # self.timer.start()
