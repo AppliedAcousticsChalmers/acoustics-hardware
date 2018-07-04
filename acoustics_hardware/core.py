@@ -101,6 +101,21 @@ class Device:
             self.outputs.append(Channel(index, 'output', **kwargs))
 
     @property
+    def pre_triggering(self):
+        try:
+            return self._pre_triggering
+        except AttributeError:
+            self._pre_triggering = 0
+            return self.pre_triggering
+
+    @pre_triggering.setter
+    def pre_triggering(self, val):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to change the pre-triggering time while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self._pre_triggering = val
+
+    @property
     def calibrations(self):
         return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
 
@@ -428,7 +443,8 @@ class Device:
             - Post-triggering
             - Aligning triggers?
         """
-        data_buffer = collections.deque(maxlen=10)
+        pre_trigger_blocks = np.ceil(self.pre_triggering * self.fs / self.framesize)
+        data_buffer = collections.deque(maxlen=pre_trigger_blocks)
         for trigger in self.__triggers:
             trigger.setup()
 
