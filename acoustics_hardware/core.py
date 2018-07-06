@@ -116,6 +116,21 @@ class Device:
             self._pre_triggering = val
 
     @property
+    def post_triggering(self):
+        try:
+            return self._post_triggering
+        except AttributeError:
+            self._post_triggering = 0
+            return self.post_triggering
+
+    @post_triggering.setter
+    def post_triggering(self, val):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to change the post-triggering time while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self._post_triggering = val
+
+    @property
     def calibrations(self):
         return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
 
@@ -443,8 +458,10 @@ class Device:
             - Post-triggering
             - Aligning triggers?
         """
-        pre_trigger_blocks = np.ceil(self.pre_triggering * self.fs / self.framesize)
-        data_buffer = collections.deque(maxlen=pre_trigger_blocks)
+        pre_trigger_frames = np.ceil(self.pre_triggering * self.fs / self.framesize)
+        post_trigger_frames = np.ceil(self.post_triggering * self.fs / self.framesize)
+        remaining_frames = 0
+        data_buffer = collections.deque(maxlen=pre_trigger_frames)
         for trigger in self.__triggers:
             trigger.setup()
 
@@ -462,6 +479,11 @@ class Device:
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
             if self.input_active.is_set():
+                remaining_frames = post_trigger_frames
+            if remaining_frames > 0:
+                remaining_frames -= 1
+                # Yes, this will possibly get more than one frame, but only when using pre-triggers
+                # when the trigger just toggled. Otherwise there will only ever be one frame in the buffer.
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
