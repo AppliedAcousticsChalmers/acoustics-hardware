@@ -417,3 +417,18 @@ class NoiseGenerator(Generator):
             self._method = val.lower()
         else:
             raise KeyError('Unknown generation method `{}`'.format(val))
+
+
+class IndexGenerator(Generator):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.index = 0
+
+    def frame(self):
+        frame = np.arange(self.index, self.index + self.device.framesize)
+        self.index += self.device.framesize
+        return frame
+
+    def reset(self):
+        super().reset()
+        self.index = 0

@@ -326,3 +326,12 @@ class NIDevice(core.Device):
             sampsWritten = write_funciton(data)
             return 0
         return output_callback
+
+
+class FeedbackDevice(core.Device):
+    def _hardware_run(self):
+        while not self._hardware_stop_event.is_set():
+            try:
+                self._hardware_input_Q.put(self._hardware_output_Q.get(timeout=self._hardware_timeout))
+            except queue.Empty:
+                pass
