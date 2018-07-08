@@ -52,6 +52,11 @@ class Device:
         # self.__main_thread = multiprocessing.Process()
         self.__main_thread = threading.Thread()
 
+        kwargs.setdefault('fs', 1)  # This is required for all devices
+        kwargs.setdefault('framesize', 1)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     def start(self):
         """Starts the device.
 
