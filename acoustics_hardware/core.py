@@ -28,10 +28,10 @@ class Device:
         max_outputs (`int`): The maximum number of outputs available.
         calibrations (`numpy.ndarray`): Calibrations of input channels, defaults to 1 for missing calibrations.
     """
-    _generator_timeout = 1
-    _trigger_timeout = 1
-    _q_timeout = 1
-    _hardware_timeout = 1
+    _generator_timeout = 1e-3
+    _trigger_timeout = 1e-3
+    _q_timeout = 1e-3
+    _hardware_timeout = 1e-3
 
     def __init__(self, **kwargs):
         # self.input_active = multiprocessing.Event()
@@ -446,9 +446,11 @@ class Device:
         generator_thread.join()
         self._hardware_stop_event.set()
         hardware_thread.join()
-        self.__trigger_stop_event.set()
+
+        self._hardware_input_Q.put(False)
+        # self.__trigger_stop_event.set()
+        # self.__q_stop_event.set()
         trigger_thread.join()
-        self.__q_stop_event.set()
         q_thread.join()
         self.__reset()
 
@@ -478,6 +480,9 @@ class Device:
                 this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 continue
+            if this_frame is False:
+                # Stop signal
+                break
             # Execute all triggering conditions
             scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
@@ -513,19 +518,7 @@ class Device:
                 self.__triggered_q.put(frame[..., :remaining_samples])
                 remaining_samples -= frame.shape[-1]
 
-        # The hardware should have stopped by now, analyze all remaining frames.
-        while True:
-            try:
-                this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
-            except queue.Empty:
-                break
-            scaled_frame = self._input_scaling(this_frame)
-            for trig in self.__triggers:
-                trig(scaled_frame)
-            data_buffer.append(this_frame)
-            if self.input_active.is_set():
-                while len(data_buffer) > 0:
-                    self.__triggered_q.put(data_buffer.popleft())
+            self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
     def __q_target(self):
         """Queue handling method.
@@ -533,6 +526,13 @@ class Device:
         This method will execute as a subthread in the device, responsible
         for moving data from the input (while active) to the queues used by
         Distributors.
+
+        Todo:
+            Redo the framework for Qs and distributors. If Distributors are made
+            callable, we would just call all distributors with the frame. If a
+            distributors needs a Q and runs some expensive processing in a different
+            thread, is is easy to implement a call function for taking the frame
+            and putting it in a Q owned by the distributor.
         """
         for distributor in self.__distributors:
             distributor.setup()
@@ -546,15 +546,9 @@ class Device:
             for Q in self.__Qs:
                 # Copy the frame to all output Qs
                 Q.put(this_frame)
-
-        # The triggering should have stopped by now, move the remaining frames.
-        while True:
-            try:
-                this_frame = self.__triggered_q.get(timeout=self._q_timeout)
-            except queue.Empty:
+            if this_frame is False:
+                # Signal to stop, we have sent it to all distributors if they need it
                 break
-            for Q in self.__Qs:
-                Q.put(this_frame)
 
     def __generator_target(self):
         """Generator handling method.
