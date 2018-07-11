@@ -322,7 +322,7 @@ class Device:
             except AttributeError:
                 distributor.device = None
 
-    def add_trigger(self, trigger):
+    def add_trigger(self, trigger, align_device=None):
         """Adds a Trigger to the Device.
 
         Arguments:
@@ -335,6 +335,8 @@ class Device:
         else:
             self.__triggers.append(trigger)
             trigger.device = self
+            if align_device is not None:
+                trigger.align_devices.append(align_device)
 
     def remove_trigger(self, trigger):
         """Removes a Trigger from the Device.
@@ -470,6 +472,7 @@ class Device:
         remaining_samples = 0
         data_buffer = collections.deque(maxlen=pre_trigger_samples // self.framesize + 2)
         triggered = False
+        self._trigger_alignment = 0
 
         for trigger in self.__triggers:
             trigger.setup()
@@ -486,9 +489,7 @@ class Device:
             # Execute all triggering conditions
             scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
-                alignment = trig(scaled_frame)
-                if alignment is not None:
-                    self._trigger_alignment = alignment
+                trig(scaled_frame)
 
             # Move the frame to the buffer
             data_buffer.append(this_frame)
@@ -496,7 +497,7 @@ class Device:
             if self.input_active.is_set() and not triggered:
                 # Triggering happened between this frame and the last, do pre-prigger aligniment
                 triggered = True
-                trigger_sample_index = self._trigger_alignment + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
+                trigger_sample_index = int(self._trigger_alignment * self.fs) + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
                 while trigger_sample_index > 0:
                     if trigger_sample_index >= self.framesize:
                         data_buffer.popleft()
@@ -510,7 +511,7 @@ class Device:
             elif not self.input_active.is_set() and triggered:
                 # Just detriggered, set remaining samples correctly
                 triggered = False
-                remaining_samples = post_trigger_samples + self._trigger_alignment + 1
+                remaining_samples = post_trigger_samples + int(self._trigger_alignment * self.fs) + 1
 
             while remaining_samples > 0:
                 try:

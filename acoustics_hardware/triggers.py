@@ -30,15 +30,13 @@ class Trigger:
             not take action. Triggers start of as active unless manually deactivated.
     """
     def __init__(self, action=None, false_action=None, auto_deactivate=True,
-                 use_calibrations=True, device=None):
+                 use_calibrations=True, device=None, align_device=None):
         self.device = device
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
         self.active.set()
 
         self.actions = []
-        self.auto_deactivate = auto_deactivate
-        self.use_calibrations = use_calibrations
         if action is not None:
             try:
                 self.actions.extend(action)
@@ -53,6 +51,15 @@ class Trigger:
                 self.false_actions.append(false_action)
 
         self.alignment = None
+        self.align_devices = []
+        if align_device is not None:
+            try:
+                self.align_devices.extend(align_device)
+            except TypeError:
+                self.align_devices.append(align_device)
+
+        self.auto_deactivate = auto_deactivate
+        self.use_calibrations = use_calibrations
 
     def __call__(self, frame):
         """Manages testing and actions."""
@@ -64,18 +71,17 @@ class Trigger:
         if self.active.is_set():
             # logger.debug('Testing in {}'.format(self.__class__.__name__))
             if any(test):
-                self.alignment = np.where(test)[0][0]
+                self.alignment = np.where(test)[0][0] / self.device.fs
                 test = True
             else:
                 self.alignment = None
                 test = False
             if test:
                 [action() for action in self.actions]
+                for dev in self.align_devices:
+                    dev._trigger_alignment = self.alignment
             else:
                 [action() for action in self.false_actions]
-            return self.alignment
-        else:
-            return None
 
     def test(self, frame):
         """Performs test.
