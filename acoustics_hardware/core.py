@@ -459,14 +459,16 @@ class Device:
         for managing the attached triggers, and handling input data.
 
         Todo:
-            - Pre-triggering using appropriate values
-            - Post-triggering
-            - Aligning triggers?
+            - Make sure that the sample level triggering works on real hardware
+            - Process the remaining frames after the hardware thread has stopped
+            - Alignment is a temporary fix, and will not work across multiple devices
         """
-        pre_trigger_frames = np.ceil(self.pre_triggering * self.fs / self.framesize)
-        post_trigger_frames = np.ceil(self.post_triggering * self.fs / self.framesize)
-        remaining_frames = 0
-        data_buffer = collections.deque(maxlen=pre_trigger_frames)
+        pre_trigger_samples = int(np.ceil(self.pre_triggering * self.fs))
+        post_trigger_samples = int(np.ceil(self.post_triggering * self.fs))
+        remaining_samples = 0
+        data_buffer = collections.deque(maxlen=pre_trigger_samples // self.framesize + 2)
+        triggered = False
+
         for trigger in self.__triggers:
             trigger.setup()
 
@@ -479,18 +481,37 @@ class Device:
             # Execute all triggering conditions
             scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
-                trig(scaled_frame)
+                alignment = trig(scaled_frame)
+                if alignment is not None:
+                    self._trigger_alignment = alignment
+
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
-            if self.input_active.is_set():
-                remaining_frames = post_trigger_frames
-            if remaining_frames > 0:
-                remaining_frames -= 1
-                # Yes, this will possibly get more than one frame, but only when using pre-triggers
-                # when the trigger just toggled. Otherwise there will only ever be one frame in the buffer.
-                while len(data_buffer) > 0:
-                    self.__triggered_q.put(data_buffer.popleft())
+            if self.input_active.is_set() and not triggered:
+                # Triggering happened between this frame and the last, do pre-prigger aligniment
+                triggered = True
+                trigger_sample_index = self._trigger_alignment + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
+                while trigger_sample_index > 0:
+                    if trigger_sample_index >= self.framesize:
+                        data_buffer.popleft()
+                    else:
+                        self.__triggered_q.put(data_buffer.popleft()[..., trigger_sample_index:])
+                    trigger_sample_index -= self.framesize
+                remaining_samples = len(data_buffer) * self.framesize
+            elif self.input_active.is_set():
+                # Continue miving data to triggered Q
+                remaining_samples += self.framesize
+            elif not self.input_active.is_set() and triggered:
+                # Just detriggered, set remaining samples correctly
+                triggered = False
+                remaining_samples = post_trigger_samples + self._trigger_alignment + 1
+
+            # TODO: Make this a while instead of if, catch the error from the deque
+            if remaining_samples > 0:
+                frame = data_buffer.popleft()
+                self.__triggered_q.put(frame[..., :remaining_samples])
+                remaining_samples -= frame.shape[-1]
 
         # The hardware should have stopped by now, analyze all remaining frames.
         while True:
