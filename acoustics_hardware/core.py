@@ -512,13 +512,15 @@ class Device:
                 triggered = False
                 remaining_samples = post_trigger_samples + self._trigger_alignment + 1
 
-            # TODO: Make this a while instead of if, catch the error from the deque
-            if remaining_samples > 0:
-                frame = data_buffer.popleft()
+            while remaining_samples > 0:
+                try:
+                    frame = data_buffer.popleft()
+                except IndexError:
+                    break
                 self.__triggered_q.put(frame[..., :remaining_samples])
                 remaining_samples -= frame.shape[-1]
 
-            self.__triggered_q.put(False)  # Signal the q-handler thread to stop
+        self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
     def __q_target(self):
         """Queue handling method.
