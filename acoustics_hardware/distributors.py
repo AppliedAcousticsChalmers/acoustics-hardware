@@ -5,6 +5,8 @@ import multiprocessing
 import threading
 import queue
 
+from . import utils
+
 
 class Distributor:
     """Base class for Distributors.
@@ -18,12 +20,24 @@ class Distributor:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def __call__(self, frame):
+        if frame is None:
+            self.stop()
+        else:
+            self.distribute(frame)
+
+    def distribute(self, frame):
+        raise NotImplementedError('Required method `distribute` is not implemented in {}'.format(self.__class__.__name__))
+
     def reset(self):
         """Resets the distributor"""
         pass
 
     def setup(self):
         """Configures the distributor state"""
+        pass
+
+    def stop(self):
         pass
 
     @property
@@ -33,6 +47,22 @@ class Distributor:
     @device.setter
     def device(self, dev):
         self._device = dev
+
+
+class QDistributor(Distributor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.Q = queue.Queue()
+
+    def distribute(self, frame):
+        self.Q.put(frame)
+
+    @property
+    def data(self):
+        return utils.concatenate_Q(self.Q)
+
+    def flush(self):
+        utils.flush_Q(self.Q)
 
 
 class HDFWriter(Distributor):

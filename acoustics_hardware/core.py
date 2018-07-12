@@ -7,6 +7,7 @@ from . import utils
 import json
 from .generators import GeneratorStop
 from .processors import LevelDetector
+from .distributors import QDistributor
 
 
 class Device:
@@ -158,18 +159,18 @@ class Device:
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
 
     def flush(self):
-        """Used to flush all Qs.
+        """Used to flush the internal data.
 
         This can be useful if a measurement needs to be discarded.
         Data that have been removed from the queues, e.g. automatic file writers,
         will not be interfered with.
 
         Note:
-            This will delete data which is still in the queues!
+            This will delete data which is still in the stored!
         """
-        for q in self.__Qs:
-            utils.flush_Q(q)
+        self.__internal_distributor.flush()
 
+    @property
     def input_data(self):
         """Collects the acquired input data.
 
@@ -182,10 +183,7 @@ class Device:
             Has the shape (n_inputs, n_samples), and the input channels are
             ordered in the same order as they were added.
         """
-        if self.input_active.is_set():
-            print('It is not safe to get all data while input is active!')
-        else:
-            return utils.concatenate_Q(self.__internal_input_Q)
+        return self.__internal_distributor.data
 
     def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
         """Calibrates a channel using a reference signal.
@@ -373,6 +371,8 @@ class Device:
             trigger.reset()
         for generator in self.__generators:
             generator.reset()
+        for distributor in self.__distributors:
+            distributor.reset()
         self.input_active.clear()
         self.output_active.clear()
 
@@ -392,8 +392,10 @@ class Device:
         self._hardware_output_Q = queue.Queue(maxsize=25)
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
-        self.__internal_input_Q = queue.Queue()
-        self.__Qs.append(self.__internal_input_Q)
+        # self.__internal_input_Q = queue.Queue()
+        # self.__Qs.append(self.__internal_input_Q)
+        self.__internal_distributor = QDistributor(device=self)
+        self.__distributors.append(self.__internal_distributor)
         self.__generator_stop_event = threading.Event()
         self.__trigger_stop_event = threading.Event()
         self.__q_stop_event = threading.Event()
@@ -403,12 +405,14 @@ class Device:
         generator_thread = threading.Thread(target=self.__generator_target)
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
-        q_thread = threading.Thread(target=self.__q_target)
+        distributor_thread = threading.Thread(target=self.__distributor_target)
 
         generator_thread.start()
         hardware_thread.start()
         trigger_thread.start()
-        q_thread.start()
+        distributor_thread.start()
+        # self.__trigger_target()
+        # self.__distributor_target()
 
         self.__main_stop_event.wait()
 
@@ -421,7 +425,7 @@ class Device:
         # self.__trigger_stop_event.set()
         # self.__q_stop_event.set()
         trigger_thread.join()
-        q_thread.join()
+        distributor_thread.join()
         self.__reset()
 
     def __trigger_target(self):
@@ -461,7 +465,7 @@ class Device:
 
         self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
-    def __q_target(self):
+    def __distributor_target(self):
         """Queue handling method.
 
         This method will execute as a subthread in the device, responsible
@@ -484,9 +488,9 @@ class Device:
                 this_frame = self.__triggered_q.get(timeout=self._q_timeout)
             except queue.Empty:
                 continue
-            for Q in self.__Qs:
+            for distributor in self.__distributors:
                 # Copy the frame to all output Qs
-                Q.put(this_frame)
+                distributor(this_frame)
             if this_frame is False:
                 # Signal to stop, we have sent it to all distributors if they need it
                 break
