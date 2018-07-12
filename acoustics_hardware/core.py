@@ -366,8 +366,6 @@ class Device:
 
         """
         self.__main_stop_event.clear()
-        self.__trigger_stop_event.clear()
-        self.__q_stop_event.clear()
         self._hardware_stop_event.clear()
         for trigger in self.__triggers:
             trigger.reset()
@@ -395,8 +393,7 @@ class Device:
         self.__internal_input_Q = queue.Queue()
         self.__Qs.append(self.__internal_input_Q)
         self.__generator_stop_event = threading.Event()
-        self.__trigger_stop_event = threading.Event()
-        self.__q_stop_event = threading.Event()
+
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
@@ -418,8 +415,6 @@ class Device:
         hardware_thread.join()
 
         self._hardware_input_Q.put(False)
-        # self.__trigger_stop_event.set()
-        # self.__q_stop_event.set()
         trigger_thread.join()
         q_thread.join()
         self.__reset()
@@ -439,7 +434,7 @@ class Device:
         for trigger in self.__triggers:
             trigger.setup()
 
-        while not self.__trigger_stop_event.is_set():
+        while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
                 this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
@@ -478,7 +473,7 @@ class Device:
         for distributor in self.__distributors:
             distributor.setup()
 
-        while not self.__q_stop_event.is_set():
+        while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
                 this_frame = self.__triggered_q.get(timeout=self._q_timeout)
