@@ -106,6 +106,11 @@ class HDFWriter(Distributor):
 
         self._stop_event = threading.Event()
 
+    def __call__(self, frame):
+        # We need to overwrite the default call method since we are handling multiple
+        # devices in this class, and should not stop because of a single device stopping.
+        pass
+
     @property
     def device(self):
         return self._devices
@@ -128,7 +133,9 @@ class HDFWriter(Distributor):
         if device is None and Q is None:
             raise ValueError('Either `device` or `Q` must be given as input')
         if Q is None:
-            Q = device._register_input_Q()
+            distr = QDistributor()
+            Q = distr.Q
+            device.add_distributor(distr)
         self._devices.append(device)
         self._input_Qs.append(Q)
 
