@@ -45,7 +45,6 @@ class Device:
 
         self.__generators = []
         self.__triggers = []
-        self.__Qs = []
         self.__distributors = []
 
         # self.__main_stop_event = multiprocessing.Event()
@@ -214,51 +213,6 @@ class Device:
         channel.calibration = detector.current_level / value
         channel.unit = unit
 
-    def _register_input_Q(self, Q=None):
-        """Registers new input Q.
-
-        This should be used to register a queue used by a Distributor. The
-        queue will receive frames read while the input is active.
-        For memory efficiency the input frames are not copied to individual
-        queues, so in-place operations are not safe. If a Distributor needs
-        to manipulate the data a copy should be made before manipulation.
-
-        Arguments:
-            Q (`~queue.Queue`, optional): The Q to register. Will be created if equal to `None`
-        Returns:
-            `~queue.Queue`: The registered Q.
-        Note:
-            The frames are NOT copied to multiple queues!
-        Todo:
-            Give a warning instead of an error while running.
-
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            # Q = multiprocessing.Queue()
-            if Q is None:
-                Q = queue.Queue()
-            self.__Qs.append(Q)
-            return Q
-
-    def _unregister_input_Q(self, Q):
-        """Unregisters input Q.
-
-        Removes a queue from the list of queues that receive input data.
-        This method should be used by a Distributor if it is removed from
-        the Device.
-
-        Arguments:
-            Q (`~queue.Queue`): The Q to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__Qs.remove(Q)
-
     def add_distributor(self, distributor):
         """Adds a Distributor to the Device.
 
@@ -392,8 +346,6 @@ class Device:
         self._hardware_output_Q = queue.Queue(maxsize=25)
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
-        # self.__internal_input_Q = queue.Queue()
-        # self.__Qs.append(self.__internal_input_Q)
         self.__internal_distributor = QDistributor(device=self)
         self.__distributors.append(self.__internal_distributor)
         self.__generator_stop_event = threading.Event()
