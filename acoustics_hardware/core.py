@@ -447,7 +447,7 @@ class Device:
                 while len(data_buffer) > 0:
                     self.__triggered_q.put(data_buffer.popleft())
 
-            self.__triggered_q.put(False)  # Signal the q-handler thread to stop
+        self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
     def __q_target(self):
         """Queue handling method.
