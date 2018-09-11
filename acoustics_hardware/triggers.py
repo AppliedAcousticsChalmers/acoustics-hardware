@@ -124,6 +124,9 @@ class RMSTrigger(Trigger):
         level_detector_args (`dict`, optional): Passed as keyword arguments to
             the internal `~.processors.LevelDetector`.
         **kwargs: Extra keyword arguments passed to `Trigger`.
+
+    Todo:
+        Rename region to slope?
     """
     def __init__(self, level, channel, region='Above', level_detector_args=None, **kwargs):
         super().__init__(**kwargs)
@@ -175,6 +178,9 @@ class PeakTrigger(Trigger):
             happens when the detected level rises above or falls below the set
             level, default ``'Above'``.
         **kwargs: Extra keyword arguments passed to `Trigger`.
+
+    Todo:
+        Rename region to slope?
     """
     def __init__(self, level, channel, region='Above', **kwargs):
         super().__init__(**kwargs)

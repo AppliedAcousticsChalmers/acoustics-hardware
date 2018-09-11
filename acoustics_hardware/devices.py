@@ -255,6 +255,7 @@ class NIDevice(core.Device):
             - Merge the callback creation function internally in this function.
                 Since they will never be used outside of here, and only once,
                 it does not make much sense to keep them as functions.
+            - Handle disallowed sample rates
         """
         self._task = nidaqmx.Task()
         for ch in self.inputs:
