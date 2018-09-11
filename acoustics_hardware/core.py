@@ -1,3 +1,4 @@
+import warnings
 import queue
 import threading
 # import multiprocessing
@@ -236,13 +237,12 @@ class Device:
 
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            # Q = multiprocessing.Queue()
-            if Q is None:
-                Q = queue.Queue()
-            self.__Qs.append(Q)
-            return Q
+            warnings.warn('Registering new Qs while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting.')
+        # Q = multiprocessing.Queue()
+        if Q is None:
+            Q = queue.Queue()
+        self.__Qs.append(Q)
+        return Q
 
     def _unregister_input_Q(self, Q):
         """Unregisters input Q.
@@ -257,9 +257,8 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__Qs.remove(Q)
+            warnings.warn('Removing Qs while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting.')
+        self.__Qs.remove(Q)
 
     def add_distributor(self, distributor):
         """Adds a Distributor to the Device.
@@ -270,10 +269,9 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add distributors while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__distributors.append(distributor)
-            distributor.device = self
+            warnings.warn('Adding distributors while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+        self.__distributors.append(distributor)
+        distributor.device = self
 
     def remove_distributor(self, distributor):
         """Removes a Distributor from the Device.
@@ -284,13 +282,12 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove distributors while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__distributors.remove(distributor)
-            try:
-                distributor.remove(self)
-            except AttributeError:
-                distributor.device = None
+            warnings.warn('Removing distributors while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
+        self.__distributors.remove(distributor)
+        try:
+            distributor.remove(self)
+        except AttributeError:
+            distributor.device = None
 
     def add_trigger(self, trigger):
         """Adds a Trigger to the Device.
@@ -301,10 +298,9 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add new triggers while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__triggers.append(trigger)
-            trigger.device = self
+            warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+        self.__triggers.append(trigger)
+        trigger.device = self
 
     def remove_trigger(self, trigger):
         """Removes a Trigger from the Device.
@@ -315,10 +311,9 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__triggers.remove(trigger)
-            trigger.device = None
+            warnings.warn('Removing triggers while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
+        self.__triggers.remove(trigger)
+        trigger.device = None
 
     def add_generator(self, generator):
         """Adds a Generator to the Device.
@@ -334,10 +329,9 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__generators.append(generator)
-            generator.device = self
+            warnings.warn('Adding generators while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+        self.__generators.append(generator)
+        generator.device = self
 
     def remove_generator(self, generator):
         """Removes a Generator from the Device.
@@ -348,10 +342,9 @@ class Device:
             Give a warning instead of an error while running.
         """
         if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__generators.remove(generator)
-            generator.device = None
+            warnings.warn('Removing generators while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
+        self.__generators.remove(generator)
+        generator.device = None
 
     def __reset(self):
         """Resets the `Device`.
