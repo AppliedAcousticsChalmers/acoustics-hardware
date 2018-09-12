@@ -4,6 +4,9 @@ import numpy as np
 import multiprocessing
 import threading
 import queue
+import warnings
+
+from . import utils
 
 
 class Distributor:
@@ -18,12 +21,24 @@ class Distributor:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def __call__(self, frame):
+        if frame is False:
+            self.stop()
+        else:
+            self.distribute(frame)
+
+    def distribute(self, frame):
+        raise NotImplementedError('Required method `distribute` is not implemented in {}'.format(self.__class__.__name__))
+
     def reset(self):
         """Resets the distributor"""
         pass
 
     def setup(self):
         """Configures the distributor state"""
+        pass
+
+    def stop(self):
         pass
 
     @property
@@ -33,6 +48,22 @@ class Distributor:
     @device.setter
     def device(self, dev):
         self._device = dev
+
+
+class QDistributor(Distributor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.Q = queue.Queue()
+
+    def distribute(self, frame):
+        self.Q.put(frame)
+
+    @property
+    def data(self):
+        return utils.concatenate_Q(self.Q)
+
+    def flush(self):
+        utils.flush_Q(self.Q)
 
 
 class HDFWriter(Distributor):
@@ -72,9 +103,14 @@ class HDFWriter(Distributor):
         self._internal_Q = multiprocessing.Queue()
         self._datasets = []
         self._manual_dataset = None
-        self._started = False
+        self._started = threading.Event()
 
         self._stop_event = threading.Event()
+
+    def __call__(self, frame):
+        # We need to overwrite the default call method since we are handling multiple
+        # devices in this class, and should not stop because of a single device stopping.
+        pass
 
     @property
     def device(self):
@@ -82,7 +118,8 @@ class HDFWriter(Distributor):
 
     @device.setter
     def device(self, device):
-        self.add_input(device=device)
+        if device is not None:
+            self.add_input(device=device)
 
     def add_input(self, device=None, Q=None):
         """Adds a new device or queue.
@@ -98,13 +135,16 @@ class HDFWriter(Distributor):
         if device is None and Q is None:
             raise ValueError('Either `device` or `Q` must be given as input')
         if Q is None:
-            Q = device._register_input_Q()
+            distr = QDistributor()
+            Q = distr.Q
+            device.add_distributor(distr)
         self._devices.append(device)
         self._input_Qs.append(Q)
 
     def setup(self):
         super().setup()
-        if not self._started:
+        if not self._started.is_set():
+            warnings.warn('HDFWriter started automatically! This will NOT work when using multiple devices.')
             self.start()
 
     def start(self, mode='auto', use_process=True):
@@ -145,7 +185,7 @@ class HDFWriter(Distributor):
                 def join():
                     return True
             self._thread = Dummy_thread
-        self._started = True
+        self._started.set()
 
     def stop(self):
         self._stop_event.set()
@@ -225,7 +265,7 @@ class HDFWriter(Distributor):
         if index is None:
             attrs = self._group.attrs
         else:
-            attrs = self._datasets[index].attrs
+            attrs = self._datasets[index][0].attrs
         for key, value in kwargs.items():
             attrs[key] = value
 
@@ -360,11 +400,13 @@ class HDFWriter(Distributor):
             if action == 'write':
                 self._write(*args)
             elif action == 'create':
-                dataset = self._create_dataset(**args)
+                self._create_dataset(**args)
             elif action == 'step':
                 self._step(**args)
             elif action == 'select':
                 self._select_group(**args)
+            elif action == 'attrs':
+                self._write_attrs(**args)
 
         self._file = h5py.File(self.filename, mode='a')
         self._select_group()
@@ -380,7 +422,7 @@ class HDFWriter(Distributor):
 
     def _auto_target(self):
         for idx, device in enumerate(self._devices):
-            name = getattr(device, 'label', getattr(device, 'name', 'dataset{}'.format(idx)))
+            name = getattr(device, 'label', getattr(device, 'name', 'data{}'.format(idx)))
             self.create_dataset(name=name, ndim=2, index=idx)
         while not self._stop_event.is_set():
             for idx, Q in enumerate(self._input_Qs):
@@ -400,7 +442,7 @@ class HDFWriter(Distributor):
 
     def _signal_target(self):
         for idx, device in enumerate(self._devices):
-            name = getattr(device, 'label', getattr(device, 'name', 'dataset{}'.format(idx)))
+            name = getattr(device, 'label', getattr(device, 'name', 'data{}'.format(idx)))
             self.create_dataset(name=name, ndim=3, index=idx)
         while not self._stop_event.is_set():
             if self._write_signal.wait(self._timeout):
