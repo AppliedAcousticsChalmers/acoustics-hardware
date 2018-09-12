@@ -28,6 +28,15 @@ class Device:
         max_inputs (`int`): The maximum number of inputs available.
         max_outputs (`int`): The maximum number of outputs available.
         calibrations (`numpy.ndarray`): Calibrations of input channels, defaults to 1 for missing calibrations.
+
+    Todo:
+        Remove the `add_trigger`, `remove_trigger`, `add_distributor`, `remove_distributor` and possibly
+        `add_generator` and `remove_generator`. Since these other objets will (almost) always have a single device
+        which devines the input data for the object it would be reasonable to have said device as a property of that
+        object. The code to manage adding/removing from the device will then be implenented in those objects. This
+        wil in the long run reduce the number of calls, since the device can be given as an input argument when creating
+        the objects. It also allows subclasses to customize how the objects are added to the device.
+
     """
     _generator_timeout = 1e-3
     _trigger_timeout = 1e-3
