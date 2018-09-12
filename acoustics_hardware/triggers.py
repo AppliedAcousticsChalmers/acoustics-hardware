@@ -30,15 +30,13 @@ class Trigger:
             not take action. Triggers start of as active unless manually deactivated.
     """
     def __init__(self, action=None, false_action=None, auto_deactivate=True,
-                 use_calibrations=True, device=None):
+                 use_calibrations=True, device=None, align_device=None):
         self.device = device
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
         self.active.set()
 
         self.actions = []
-        self.auto_deactivate = auto_deactivate
-        self.use_calibrations = use_calibrations
         if action is not None:
             try:
                 self.actions.extend(action)
@@ -52,6 +50,17 @@ class Trigger:
             except TypeError:
                 self.false_actions.append(false_action)
 
+        self.alignment = None
+        self.align_devices = []
+        if align_device is not None:
+            try:
+                self.align_devices.extend(align_device)
+            except TypeError:
+                self.align_devices.append(align_device)
+
+        self.auto_deactivate = auto_deactivate
+        self.use_calibrations = use_calibrations
+
     def __call__(self, frame):
         """Manages testing and actions."""
         # We need to perform the test event if the triggering is disabled
@@ -61,8 +70,16 @@ class Trigger:
         test = self.test(frame * self.calibrations)
         if self.active.is_set():
             # logger.debug('Testing in {}'.format(self.__class__.__name__))
+            if any(test):
+                self.alignment = np.where(test)[0][0] / self.device.fs
+                test = True
+            else:
+                self.alignment = None
+                test = False
             if test:
                 [action() for action in self.actions]
+                for dev in self.align_devices:
+                    dev._trigger_alignment = self.alignment
             else:
                 [action() for action in self.false_actions]
 
@@ -143,7 +160,13 @@ class RMSTrigger(Trigger):
     def test(self, frame):
         # logger.debug('Testing in RMS trigger')
         levels = self.level_detector(frame)
-        return any(self._sign * levels > self.trigger_level * self._sign)
+        return self._sign * levels >= self.trigger_level * self._sign
+        # meets_criteria = self._sign * levels > self.trigger_level * self._sign
+        # if any(meets_criteria):
+            # self.trigger_alignment = np.where(meets_criteria)[0][0]
+            # return True
+        # else:
+            # return False
 
     def reset(self):
         super().reset()
@@ -191,7 +214,8 @@ class PeakTrigger(Trigger):
     def test(self, frame):
         # logger.debug('Testing in Peak triggger')
         levels = np.abs(frame[self.channel])
-        return any(self._sign * levels > self.trigger_level * self._sign)
+        return self._sign * levels >= self.trigger_level * self._sign
+        # return any(self._sign * levels > self.trigger_level * self._sign)
 
     @property
     def region(self):

@@ -116,6 +116,36 @@ class Device:
             self.outputs.append(Channel(index, 'output', **kwargs))
 
     @property
+    def pre_triggering(self):
+        try:
+            return self._pre_triggering
+        except AttributeError:
+            self._pre_triggering = 0
+            return self.pre_triggering
+
+    @pre_triggering.setter
+    def pre_triggering(self, val):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to change the pre-triggering time while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self._pre_triggering = val
+
+    @property
+    def post_triggering(self):
+        try:
+            return self._post_triggering
+        except AttributeError:
+            self._post_triggering = 0
+            return self.post_triggering
+
+    @post_triggering.setter
+    def post_triggering(self, val):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to change the post-triggering time while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self._post_triggering = val
+
+    @property
     def calibrations(self):
         return np.array([c.calibration if c.calibration is not None else 1 for c in self.inputs])
 
@@ -252,7 +282,7 @@ class Device:
         except AttributeError:
             distributor.device = None
 
-    def add_trigger(self, trigger):
+    def add_trigger(self, trigger, align_device=None):
         """Adds a Trigger to the Device.
 
         Arguments:
@@ -386,11 +416,17 @@ class Device:
         for managing the attached triggers, and handling input data.
 
         Todo:
-            - Pre-triggering using appropriate values
-            - Post-triggering
-            - Aligning triggers?
+            - Make sure that the sample level triggering works on real hardware
+            - Process the remaining frames after the hardware thread has stopped
+            - Alignment is a temporary fix, and will not work across multiple devices
         """
-        data_buffer = collections.deque(maxlen=10)
+        pre_trigger_samples = int(np.ceil(self.pre_triggering * self.fs))
+        post_trigger_samples = int(np.ceil(self.post_triggering * self.fs))
+        remaining_samples = 0
+        data_buffer = collections.deque(maxlen=pre_trigger_samples // self.framesize + 2)
+        triggered = False
+        self._trigger_alignment = 0
+
         for trigger in self.__triggers:
             trigger.setup()
 
@@ -407,12 +443,36 @@ class Device:
             scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
                 trig(scaled_frame)
+
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
-            if self.input_active.is_set():
-                while len(data_buffer) > 0:
-                    self.__triggered_q.put(data_buffer.popleft())
+            if self.input_active.is_set() and not triggered:
+                # Triggering happened between this frame and the last, do pre-prigger aligniment
+                triggered = True
+                trigger_sample_index = int(self._trigger_alignment * self.fs) + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
+                while trigger_sample_index > 0:
+                    if trigger_sample_index >= self.framesize:
+                        data_buffer.popleft()
+                    else:
+                        self.__triggered_q.put(data_buffer.popleft()[..., trigger_sample_index:])
+                    trigger_sample_index -= self.framesize
+                remaining_samples = len(data_buffer) * self.framesize
+            elif self.input_active.is_set():
+                # Continue miving data to triggered Q
+                remaining_samples += self.framesize
+            elif not self.input_active.is_set() and triggered:
+                # Just detriggered, set remaining samples correctly
+                triggered = False
+                remaining_samples = post_trigger_samples + int(self._trigger_alignment * self.fs) + 1
+
+            while remaining_samples > 0:
+                try:
+                    frame = data_buffer.popleft()
+                except IndexError:
+                    break
+                self.__triggered_q.put(frame[..., :remaining_samples])
+                remaining_samples -= frame.shape[-1]
 
         self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
