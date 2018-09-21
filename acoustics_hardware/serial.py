@@ -177,21 +177,30 @@ class VariSphere:
                 self.el = schunk.Module(schunk.SerialConnection(
                     0x0B, Serial, port=el_port, baudrate=9600, timeout=1))
 
-    def move(self, az, el):
-        self.az.move_pos(az)
-        self.el.move_pos(el)
+    def move(self, az=None, el=None):
+        if az is not None:
+            self.az.move_pos(az)
+        if el is not None:
+            self.el.move_pos(el)
 
-    def move_blocking(self, az, el):
+    def move_blocking(self, az=None, el=None):
         self.move(az, el)
         self.wait()
 
     def stop(self):
-        self.az.stop()
-        self.el.stop()
+        if self.az is not None:
+            self.az.stop()
+        if self.el is not None:
+            self.el.stop()
 
     def wait(self):
-        self.az.wait_until_position_reached()
-        self.el.wait_until_position_reached()
+        if self.az is not None:
+            self.az.wait_until_position_reached()
+        if self.el is not None:
+            self.el.wait_until_position_reached()
 
     def reset(self):
-        self.move(0, 0)
+        if self.az is not None:
+            self.az.move_pos(0)
+        if self.el is not None:
+            self.el.move_pos(0)
