@@ -1,5 +1,5 @@
 # from threading import Thread, Event
-from serial import Serial
+from serial import Serial, serial_for_url
 import schunk
 
 
@@ -141,11 +141,41 @@ class SerialGenerator:  # (Thread):
 
 
 class VariSphere:
-    def __init__(self, az_port='COM1', el_port='COM2'):
-        self.az = schunk.Module(schunk.SerialConnection(
-            0x0B, Serial, port=az_port, baudrate=9600, timeout=1))
-        self.el = schunk.Module(schunk.SerialConnection(
-            0x0B, Serial, port=el_port, baudrate=9600, timeout=1))
+    """Class for controlling a VariSphere
+
+    Supports two modes, comport access or ip access. Comport usage means that
+    there is a comport listed in the system which is connected to the motors.
+    Ip usage means that there is a TCP port on the system which is connected
+    to the motors.
+
+    Arguments:
+        az_port (`str`): The port for the azimuth motor. Specify `None` or `False`
+            to not use this motor. Default 4001.
+        el_port (`str`): The port for the elevation motor. Specify `None` or `False`
+            to not use this motor. Default 4002.
+        ip (`str`): Ip adress of the ethernet-to-serial interface. Specify `None`
+            or `False` to use comports mode. Default `192.168.127.120`.
+
+    """
+    def __init__(self, az_port='4001', el_port='4002', ip='192.168.127.120'):
+        self.az = None
+        self.el = None
+        if ip:
+            if az_port:
+                self.az = schunk.Module(schunk.SerialConnection(
+                    0x0B, serial_for_url, url=ip + ':' + str(az_port),
+                    baudrate=9600, timeout=1))
+            if el_port:
+                self.el = schunk.Module(schunk.SerialConnection(
+                    0x0B, serial_for_url, url=ip + ':' + str(el_port),
+                    baudrate=9600, timeout=1))
+        else:
+            if az_port:
+                self.az = schunk.Module(schunk.SerialConnection(
+                    0x0B, Serial, port=az_port, baudrate=9600, timeout=1))
+            if el_port:
+                self.el = schunk.Module(schunk.SerialConnection(
+                    0x0B, Serial, port=el_port, baudrate=9600, timeout=1))
 
     def move(self, az, el):
         self.az.move_pos(az)
