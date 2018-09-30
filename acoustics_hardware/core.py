@@ -312,36 +312,36 @@ class Device:
     #     self.__triggers.remove(trigger)
     #     trigger.device = None
 
-    def add_generator(self, generator):
-        """Adds a Generator to the Device.
+    # def add_generator(self, generator):
+    #     """Adds a Generator to the Device.
 
-        Arguments:
-            generator: The generator to add.
-        Note:
-            The order that multiple generators are added to a device
-            dictates which output channel receives data from which generator.
-            The total number of generated channels must match the number of
-            output channels.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            warnings.warn('Adding generators while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
-        self.__generators.append(generator)
-        generator.device = self
+    #     Arguments:
+    #         generator: The generator to add.
+    #     Note:
+    #         The order that multiple generators are added to a device
+    #         dictates which output channel receives data from which generator.
+    #         The total number of generated channels must match the number of
+    #         output channels.
+    #     Todo:
+    #         Give a warning instead of an error while running.
+    #     """
+    #     if self.__main_thread.is_alive():
+    #         warnings.warn('Adding generators while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+    #     self.__generators.append(generator)
+    #     generator.device = self
 
-    def remove_generator(self, generator):
-        """Removes a Generator from the Device.
+    # def remove_generator(self, generator):
+    #     """Removes a Generator from the Device.
 
-        Arguments:
-            generator: The generator to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            warnings.warn('Removing generators while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
-        self.__generators.remove(generator)
-        generator.device = None
+    #     Arguments:
+    #         generator: The generator to remove.
+    #     Todo:
+    #         Give a warning instead of an error while running.
+    #     """
+    #     if self.__main_thread.is_alive():
+    #         warnings.warn('Removing generators while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
+    #     self.__generators.remove(generator)
+    #     generator.device = None
 
     def __reset(self):
         """Resets the `Device`.

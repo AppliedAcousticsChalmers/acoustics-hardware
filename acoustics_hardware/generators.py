@@ -2,6 +2,7 @@ import numpy as np
 from numpy.fft import rfft as fft, irfft as ifft
 from scipy.signal import waveforms, max_len_seq
 import queue
+import warnings
 from . import utils
 
 
@@ -46,11 +47,24 @@ class Generator:
 
     @property
     def device(self):
-        return self._device
+        try:
+            return self._device
+        except AttributeError:
+            return None
 
     @device.setter
     def device(self, dev):
+        if self.device is not None:
+            # Unregister from the previous device
+            if self.device.initialized:
+                warnings.warn('Removing generators while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting. ')
+            self.device._Device__generators.remove(self)
         self._device = dev
+        if self.device is not None:
+            # Register to the new device
+            if self.device.initialized:
+                warnings.warn('Adding generators while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+            self.device._Device__generators.append(self)
 
 
 class GeneratorStop(Exception):
