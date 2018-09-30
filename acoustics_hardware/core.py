@@ -286,31 +286,31 @@ class Device:
     #     except AttributeError:
     #         distributor.device = None
 
-    def add_trigger(self, trigger, align_device=None):
-        """Adds a Trigger to the Device.
+    # def add_trigger(self, trigger, align_device=None):
+    #     """Adds a Trigger to the Device.
 
-        Arguments:
-            trigger: The trigger to add.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
-        self.__triggers.append(trigger)
-        trigger.device = self
+    #     Arguments:
+    #         trigger: The trigger to add.
+    #     Todo:
+    #         Give a warning instead of an error while running.
+    #     """
+    #     if self.__main_thread.is_alive():
+    #         warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+    #     self.__triggers.append(trigger)
+    #     trigger.device = self
 
-    def remove_trigger(self, trigger):
-        """Removes a Trigger from the Device.
+    # def remove_trigger(self, trigger):
+    #     """Removes a Trigger from the Device.
 
-        Arguments:
-            trigger: The trigger to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            warnings.warn('Removing triggers while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
-        self.__triggers.remove(trigger)
-        trigger.device = None
+    #     Arguments:
+    #         trigger: The trigger to remove.
+    #     Todo:
+    #         Give a warning instead of an error while running.
+    #     """
+    #     if self.__main_thread.is_alive():
+    #         warnings.warn('Removing triggers while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
+    #     self.__triggers.remove(trigger)
+    #     trigger.device = None
 
     def add_generator(self, generator):
         """Adds a Generator to the Device.

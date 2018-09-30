@@ -1,6 +1,7 @@
 import numpy as np
 import threading
 import logging
+import warnings
 
 from . import processors
 
@@ -120,11 +121,24 @@ class Trigger:
 
     @property
     def device(self):
-        return self._device
+        try:
+            return self._device
+        except AttributeError:
+            return None
 
     @device.setter
     def device(self, dev):
+        if self.device is not None:
+            # Unregister from the previous device
+            if self.device.initialized:
+                warnings.warn('Removing triggers while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting. ')
+            self.device._Device__triggers.remove(self)
         self._device = dev
+        if self.device is not None:
+            # Register to the new device
+            if self.device.initialized:
+                warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+            self.device._Device__triggers.append(self)
 
 
 class RMSTrigger(Trigger):
