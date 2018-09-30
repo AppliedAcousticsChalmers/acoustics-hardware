@@ -67,8 +67,8 @@ class Device:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def start(self):
-        """Starts the device.
+    def initialize(self):
+        """Initializes the device.
 
         This creates the connections between the hardware and the software,
         configures the hardware, and initializes triggers and generators.
@@ -83,8 +83,8 @@ class Device:
 
         self.__main_thread.start()
 
-    def stop(self):
-        """Stops the device.
+    def terminate(self):
+        """Terminates the device.
 
         Use this to turn off or disconnect a device safely after a measurement.
         It is not recommended to use this as deactivation control, i.e. you should
@@ -252,6 +252,11 @@ class Device:
         channel = self.inputs[self.inputs.index(channel)]
         channel.calibration = detector.current_level / value
         channel.unit = unit
+
+    @property
+    def initialized(self):
+        return self.__main_thread.is_alive()
+    
 
     def add_distributor(self, distributor):
         """Adds a Distributor to the Device.
