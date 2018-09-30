@@ -43,11 +43,24 @@ class Distributor:
 
     @property
     def device(self):
-        return self._device
+        try:
+            return self._device
+        except AttributeError:
+            return None
 
     @device.setter
     def device(self, dev):
+        if self.device is not None:
+            # Unregister from the previous device
+            if self.device.initialized:
+                warnings.warn('Removing distributors while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting. ')
+            self.device._Device__distributors.remove(self)
         self._device = dev
+        if self.device is not None:
+            # Register to the new device
+            if self.device.initialized:
+                warnings.warn('Adding distributors while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
+            self.device._Device__distributors.append(self)
 
 
 class QDistributor(Distributor):
@@ -83,6 +96,9 @@ class HDFWriter(Distributor):
         name (`str`): The path to the file to write to.
     Note:
         Only create a single HDFWriter per file!
+    Todo:
+        Properly debug this class. It is quite advanced and has undergone many
+        changes since the initial implementation...
     """
     _timeout = 0.1
 
@@ -135,9 +151,8 @@ class HDFWriter(Distributor):
         if device is None and Q is None:
             raise ValueError('Either `device` or `Q` must be given as input')
         if Q is None:
-            distr = QDistributor()
+            distr = QDistributor(device=device)
             Q = distr.Q
-            device.add_distributor(distr)
         self._devices.append(device)
         self._input_Qs.append(Q)
 
