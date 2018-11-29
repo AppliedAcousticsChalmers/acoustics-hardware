@@ -382,8 +382,14 @@ class Device:
         self._hardware_output_Q = queue.Queue(maxsize=25)
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
-        self.__internal_distributor = QDistributor(device=self)
-        self.__distributors.append(self.__internal_distributor)
+        try:
+            if self.__internal_distributor is None:
+                raise AttributeError
+        except AttributeError:
+            with warnings.catch_warnings() as w:
+                warnings.filterwarnings('ignore', module='acoustics_hardware.distributors')
+                self.__internal_distributor = QDistributor(device=self)
+
         self.__generator_stop_event = threading.Event()
 
         # Start hardware in separate thread
