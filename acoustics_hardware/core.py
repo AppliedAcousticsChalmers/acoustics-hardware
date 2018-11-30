@@ -55,6 +55,7 @@ class Device:
 
         self.__generators = []
         self.__triggers = []
+        self.__output_triggers = []
         self.__distributors = []
 
         # self.__main_stop_event = multiprocessing.Event()
@@ -209,8 +210,7 @@ class Device:
         """
         self.__internal_distributor.flush()
 
-    @property
-    def input_data(self):
+    def get_input_data(self, blocking=True, timeout=-1):
         """Collects the acquired input data.
 
         Data in stored internally in the `Device` object while input is active.
@@ -222,7 +222,19 @@ class Device:
             Has the shape (n_inputs, n_samples), and the input channels are
             ordered in the same order as they were added.
         """
-        return self.__internal_distributor.data
+        do_relese = self.__input_data_lock.acquire(blocking=blocking, timeout=timeout)
+        try:
+            data = self.__internal_distributor.data
+        except AttributeError:
+            raise ValueError('Cannot get input data from uninitialized device!')
+        except ValueError:
+            raise ValueError('No input data to get!')
+        else:
+            return data
+        finally:
+            if do_relese:
+                self.__input_data_lock.release()
+
 
     def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
         """Calibrates a channel using a reference signal.
@@ -379,7 +391,12 @@ class Device:
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
-        self._hardware_output_Q = queue.Queue(maxsize=2)
+        # self._hardware_output_Q = queue.Queue(maxsize=2)
+        # self._hardware_output_Q = Device.CountingQueue(maxsize=2)
+        self._hardware_output_Q = MasterSlaveQueue(maxsize=2)
+        # self.__output_trigger_Q = queue.Queue()
+        # self.__output_trigger_frames = threading.Semaphore(0)
+        self.__input_data_lock = threading.Lock()
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
         try:
@@ -392,15 +409,18 @@ class Device:
 
         self.__generator_stop_event = threading.Event()
 
+
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
         generator_thread = threading.Thread(target=self.__generator_target)
+        output_trigger_thread = threading.Thread(target=self.__output_trigger_target)
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
         distributor_thread = threading.Thread(target=self.__distributor_target)
 
         generator_thread.start()
+        output_trigger_thread.start()
         hardware_thread.start()
         trigger_thread.start()
         distributor_thread.start()
@@ -408,11 +428,12 @@ class Device:
         # self.__distributor_target()
 
         self.__main_stop_event.wait()
+        self._hardware_stop_event.set()
+        hardware_thread.join()
 
         self.__generator_stop_event.set()
         generator_thread.join()
-        self._hardware_stop_event.set()
-        hardware_thread.join()
+        output_trigger_thread.join()
 
         self._hardware_input_Q.put(False)
         trigger_thread.join()
@@ -435,6 +456,7 @@ class Device:
         remaining_samples = 0
         data_buffer = collections.deque(maxlen=pre_trigger_samples // self.framesize + 2)
         triggered = False
+        collecting_input = False
         self._trigger_alignment = 0
 
         for trigger in self.__triggers:
@@ -448,16 +470,19 @@ class Device:
                 continue
             if this_frame is False:
                 # Stop signal
+                self._hardware_input_Q.task_done()    
                 break
             # Execute all triggering conditions
             scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
                 trig(scaled_frame)
+            self._hardware_input_Q.task_done()
 
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
             if self.input_active.is_set() and not triggered:
+                collecting_input = self.__input_data_lock.acquire()
                 # Triggering happened between this frame and the last, do pre-prigger aligniment
                 triggered = True
                 trigger_sample_index = int(self._trigger_alignment * self.fs) + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
@@ -483,6 +508,10 @@ class Device:
                     break
                 self.__triggered_q.put(frame[..., :remaining_samples])
                 remaining_samples -= frame.shape[-1]
+            else:
+                if collecting_input and not triggered:
+                    self.__input_data_lock.release()
+                    collecting_input = False
 
         self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
@@ -512,6 +541,7 @@ class Device:
             for distributor in self.__distributors:
                 # Copy the frame to all output Qs
                 distributor(this_frame)
+            self.__triggered_q.task_done()
             if this_frame is False:
                 # Signal to stop, we have sent it to all distributors if they need it
                 break
@@ -527,19 +557,70 @@ class Device:
             generator.setup()
         use_prev_frame = False
         while not self.__generator_stop_event.is_set():
-            if self.output_active.wait(timeout=self._generator_timeout):
+            if self.output_active.is_set():
                 try:
                     if not use_prev_frame:
                         frame = np.concatenate([generator() for generator in self.__generators])
-                except GeneratorStop:
+                except (GeneratorStop, ValueError):
                     self.output_active.clear()
                     continue
-                try:
-                    self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
-                except queue.Full:
-                    use_prev_frame = True
-                else:
-                    use_prev_frame = False
+            else:
+                frame = np.zeros((len(self.outputs), self.framesize))
+            try:
+                self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
+            except queue.Full:
+                use_prev_frame = True
+            else:
+                use_prev_frame = False
+
+        # Clear out the output Q to halt the output trigger thread
+        while True:
+            try:
+                self._hardware_output_Q.get_nowait()
+                self._hardware_output_Q.task_done()
+            except queue.Empty:
+                break
+        self._hardware_output_Q.put(False)
+        self._hardware_output_Q.task_done()
+
+    def __output_trigger_target(self):
+        for trig in self.__output_triggers:
+            trig.setup()
+
+        while True:
+            # self.__output_trigger_frames.acquire()
+            # self._hardware_output_Q.decrease()
+            # frame = self.__output_trigger_Q.get()
+            frame = self._hardware_output_Q.get_slave()
+            if frame is False:
+                self._hardware_output_Q.slave_task_done()
+                break
+            for trig in self.__output_triggers:
+                trig(frame)
+            self._hardware_output_Q.slave_task_done()
+
+class MasterSlaveQueue(queue.Queue):
+    def __init__(self, *args, slaves=1, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self._slave = queue.Queue()
+        self._counter = threading.Semaphore(0)
+
+    def task_done(self):
+        super().task_done()
+        self._counter.release()
+
+    def slave_task_done(self):
+        self._slave.task_done()
+
+    def get_slave(self, block=True, timeout=None):
+        self._counter.acquire(blocking=block, timeout=timeout)
+        return self._slave.get_nowait()
+
+    def put(self, item, block=True, timeout=None):
+        super().put(item, block=block, timeout=timeout)
+        self._slave.put(item)
+
 
 
 class Channel(int):

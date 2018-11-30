@@ -31,7 +31,8 @@ class Trigger:
             not take action. Triggers start of as active unless manually deactivated.
     """
     def __init__(self, action=None, false_action=None, auto_deactivate=True,
-                 use_calibrations=True, device=None, align_device=None):
+                 use_calibrations=True, device=None, align_device=None, side='input'):
+        self.side = side
         self.device = device
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
@@ -102,10 +103,13 @@ class Trigger:
 
     def setup(self):
         """Configures trigger state."""
-        if self.use_calibrations:
-            calibrations = self.device.calibrations
+        if self.side == 'input':
+            if self.use_calibrations:
+                calibrations = self.device.calibrations
+            else:
+                calibrations = np.ones(len(self.device.inputs))
         else:
-            calibrations = np.ones(len(self.device.inputs))
+            calibrations = np.ones(len(self.device.outputs))
         self.calibrations = calibrations[:, np.newaxis]
 
     @property
@@ -132,13 +136,19 @@ class Trigger:
             # Unregister from the previous device
             if self.device.initialized:
                 warnings.warn('Removing triggers while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting. ')
-            self.device._Device__triggers.remove(self)
+            if self.side == 'input':
+                self.device._Device__triggers.remove(self)
+            elif self.side == 'output':
+                self.device._Device__output_triggers.remove(self)
         self._device = dev
         if self.device is not None:
             # Register to the new device
             if self.device.initialized:
                 warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
-            self.device._Device__triggers.append(self)
+            if self.side == 'input':
+                self.device._Device__triggers.append(self)
+            elif self.side == 'output':
+                self.device._Device__output_triggers.append(self)
 
 
 class RMSTrigger(Trigger):
