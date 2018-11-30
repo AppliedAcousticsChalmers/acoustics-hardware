@@ -269,92 +269,6 @@ class Device:
     def initialized(self):
         return self.__main_thread.is_alive()
 
-    # def add_distributor(self, distributor):
-    #     """Adds a Distributor to the Device.
-
-    #     Arguments:
-    #         distributor: The distributor to add.
-    #     Todo:
-    #         Give a warning instead of an error while running.
-    #     """
-    #     if self.__main_thread.is_alive():
-    #         warnings.warn('Adding distributors while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
-    #     self.__distributors.append(distributor)
-    #     distributor.device = self
-
-    # def remove_distributor(self, distributor):
-    #     """Removes a Distributor from the Device.
-
-    #     Arguments:
-    #         distributor: The distributor to remove.
-    #     Todo:
-    #         Give a warning instead of an error while running.
-    #     """
-    #     if self.__main_thread.is_alive():
-    #         warnings.warn('Removing distributors while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
-    #     self.__distributors.remove(distributor)
-    #     try:
-    #         distributor.remove(self)
-    #     except AttributeError:
-    #         distributor.device = None
-
-    # def add_trigger(self, trigger, align_device=None):
-    #     """Adds a Trigger to the Device.
-
-    #     Arguments:
-    #         trigger: The trigger to add.
-    #     Todo:
-    #         Give a warning instead of an error while running.
-    #     """
-    #     if self.__main_thread.is_alive():
-    #         warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
-    #     self.__triggers.append(trigger)
-    #     trigger.device = self
-
-    # def remove_trigger(self, trigger):
-    #     """Removes a Trigger from the Device.
-
-    #     Arguments:
-    #         trigger: The trigger to remove.
-    #     Todo:
-    #         Give a warning instead of an error while running.
-    #     """
-    #     if self.__main_thread.is_alive():
-    #         warnings.warn('Removing triggers while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
-    #     self.__triggers.remove(trigger)
-    #     trigger.device = None
-
-    # def add_generator(self, generator):
-    #     """Adds a Generator to the Device.
-
-    #     Arguments:
-    #         generator: The generator to add.
-    #     Note:
-    #         The order that multiple generators are added to a device
-    #         dictates which output channel receives data from which generator.
-    #         The total number of generated channels must match the number of
-    #         output channels.
-    #     Todo:
-    #         Give a warning instead of an error while running.
-    #     """
-    #     if self.__main_thread.is_alive():
-    #         warnings.warn('Adding generators while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
-    #     self.__generators.append(generator)
-    #     generator.device = self
-
-    # def remove_generator(self, generator):
-    #     """Removes a Generator from the Device.
-
-    #     Arguments:
-    #         generator: The generator to remove.
-    #     Todo:
-    #         Give a warning instead of an error while running.
-    #     """
-    #     if self.__main_thread.is_alive():
-    #         warnings.warn('Removing generators while the device is running is not guaranteen to be thread safe. Stop the device and perform all setup before starting.')
-    #     self.__generators.remove(generator)
-    #     generator.device = None
-
     def __reset(self):
         """Resets the `Device`.
 
@@ -391,11 +305,7 @@ class Device:
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
-        # self._hardware_output_Q = queue.Queue(maxsize=2)
-        # self._hardware_output_Q = Device.CountingQueue(maxsize=2)
         self._hardware_output_Q = MasterSlaveQueue(maxsize=2)
-        # self.__output_trigger_Q = queue.Queue()
-        # self.__output_trigger_frames = threading.Semaphore(0)
         self.__input_data_lock = threading.Lock()
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
@@ -424,8 +334,6 @@ class Device:
         hardware_thread.start()
         trigger_thread.start()
         distributor_thread.start()
-        # self.__trigger_target()
-        # self.__distributor_target()
 
         self.__main_stop_event.wait()
         self._hardware_stop_event.set()
@@ -588,9 +496,6 @@ class Device:
             trig.setup()
 
         while True:
-            # self.__output_trigger_frames.acquire()
-            # self._hardware_output_Q.decrease()
-            # frame = self.__output_trigger_Q.get()
             frame = self._hardware_output_Q.get_slave()
             if frame is False:
                 self._hardware_output_Q.slave_task_done()
