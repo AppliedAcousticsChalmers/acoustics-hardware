@@ -257,6 +257,7 @@ class NIDevice(core.Device):
                 it does not make much sense to keep them as functions.
             - Handle disallowed sample rates
         """
+        nidaqmx.system.Device(self.name).reset_device()
         self._task = nidaqmx.Task()
         for ch in self.inputs:
             self._task.ai_channels.add_ai_voltage_chan(self.name + '/ai{}'.format(int(ch)))

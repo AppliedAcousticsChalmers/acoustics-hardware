@@ -379,7 +379,7 @@ class Device:
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
-        self._hardware_output_Q = queue.Queue(maxsize=25)
+        self._hardware_output_Q = queue.Queue(maxsize=2)
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
         try:
@@ -538,6 +538,8 @@ class Device:
                     self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
                 except queue.Full:
                     use_prev_frame = True
+                else:
+                    use_prev_frame = False
 
 
 class Channel(int):
