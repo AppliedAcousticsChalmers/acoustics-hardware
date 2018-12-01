@@ -163,11 +163,11 @@ class VariSphere:
         if ip:
             if az_port:
                 self.az = schunk.Module(schunk.SerialConnection(
-                    0x0B, serial_for_url, url=ip + ':' + str(az_port),
+                    0x0B, serial_for_url, url='socket://' + ip + ':' + str(az_port),
                     baudrate=9600, timeout=1))
             if el_port:
                 self.el = schunk.Module(schunk.SerialConnection(
-                    0x0B, serial_for_url, url=ip + ':' + str(el_port),
+                    0x0B, serial_for_url, url='socket://' + ip + ':' + str(el_port),
                     baudrate=9600, timeout=1))
         else:
             if az_port:
