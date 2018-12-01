@@ -224,7 +224,7 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
     def setup(self):
         super().setup()
         self.sequence, state = max_len_seq(self.order)
-        self.signal = 1 - 2 * self.sequence
+        self.signal = (1 - 2 * self.sequence).astype('float64')
 
 
 class FunctionGenerator(Generator):
