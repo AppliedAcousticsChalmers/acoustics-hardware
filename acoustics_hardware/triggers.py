@@ -135,7 +135,7 @@ class Trigger:
         if self.device is not None:
             # Unregister from the previous device
             if self.device.initialized:
-                warnings.warn('Removing triggers while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting. ')
+                self.reset()
             if self.side == 'input':
                 self.device._Device__triggers.remove(self)
             elif self.side == 'output':
@@ -143,12 +143,12 @@ class Trigger:
         self._device = dev
         if self.device is not None:
             # Register to the new device
-            if self.device.initialized:
-                warnings.warn('Adding triggers while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
             if self.side == 'input':
                 self.device._Device__triggers.append(self)
             elif self.side == 'output':
                 self.device._Device__output_triggers.append(self)
+                if self.device.initialized:
+                    self.setup()
 
 
 class RMSTrigger(Trigger):

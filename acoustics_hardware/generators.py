@@ -57,14 +57,14 @@ class Generator:
         if self.device is not None:
             # Unregister from the previous device
             if self.device.initialized:
-                warnings.warn('Removing generators while the device is running is not guaranteed to be thread safe. Stop the device and perform all setup before starting. ')
+                self.reset()
             self.device._Device__generators.remove(self)
         self._device = dev
         if self.device is not None:
             # Register to the new device
-            if self.device.initialized:
-                warnings.warn('Adding generators while the device is running if not guaranteed to be thread safe, and might not be initialized properly. Stop the device and perform all setup before starting.')
             self.device._Device__generators.append(self)
+            if self.device.initialized:
+                self.setup()
 
 
 class GeneratorStop(Exception):
