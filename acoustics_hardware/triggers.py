@@ -1,6 +1,7 @@
 import numpy as np
 import threading
 import logging
+import warnings
 
 from . import processors
 
@@ -30,15 +31,14 @@ class Trigger:
             not take action. Triggers start of as active unless manually deactivated.
     """
     def __init__(self, action=None, false_action=None, auto_deactivate=True,
-                 use_calibrations=True, device=None):
+                 use_calibrations=True, device=None, align_device=None, side='input'):
+        self.side = side
         self.device = device
         # self.active = multiprocessing.Event()
         self.active = threading.Event()
         self.active.set()
 
         self.actions = []
-        self.auto_deactivate = auto_deactivate
-        self.use_calibrations = use_calibrations
         if action is not None:
             try:
                 self.actions.extend(action)
@@ -52,6 +52,17 @@ class Trigger:
             except TypeError:
                 self.false_actions.append(false_action)
 
+        self.alignment = None
+        self.align_devices = []
+        if align_device is not None:
+            try:
+                self.align_devices.extend(align_device)
+            except TypeError:
+                self.align_devices.append(align_device)
+
+        self.auto_deactivate = auto_deactivate
+        self.use_calibrations = use_calibrations
+
     def __call__(self, frame):
         """Manages testing and actions."""
         # We need to perform the test event if the triggering is disabled
@@ -61,8 +72,16 @@ class Trigger:
         test = self.test(frame * self.calibrations)
         if self.active.is_set():
             # logger.debug('Testing in {}'.format(self.__class__.__name__))
+            if any(test):
+                self.alignment = np.where(test)[0][0] / self.device.fs
+                test = True
+            else:
+                self.alignment = None
+                test = False
             if test:
                 [action() for action in self.actions]
+                for dev in self.align_devices:
+                    dev._trigger_alignment = self.alignment
             else:
                 [action() for action in self.false_actions]
 
@@ -84,10 +103,13 @@ class Trigger:
 
     def setup(self):
         """Configures trigger state."""
-        if self.use_calibrations:
-            calibrations = self.device.calibrations
+        if self.side == 'input':
+            if self.use_calibrations:
+                calibrations = self.device.calibrations
+            else:
+                calibrations = np.ones(len(self.device.inputs))
         else:
-            calibrations = np.ones(len(self.device.inputs))
+            calibrations = np.ones(len(self.device.outputs))
         self.calibrations = calibrations[:, np.newaxis]
 
     @property
@@ -103,11 +125,30 @@ class Trigger:
 
     @property
     def device(self):
-        return self._device
+        try:
+            return self._device
+        except AttributeError:
+            return None
 
     @device.setter
     def device(self, dev):
+        if self.device is not None:
+            # Unregister from the previous device
+            if self.device.initialized:
+                self.reset()
+            if self.side == 'input':
+                self.device._Device__triggers.remove(self)
+            elif self.side == 'output':
+                self.device._Device__output_triggers.remove(self)
         self._device = dev
+        if self.device is not None:
+            # Register to the new device
+            if self.side == 'input':
+                self.device._Device__triggers.append(self)
+            elif self.side == 'output':
+                self.device._Device__output_triggers.append(self)
+                if self.device.initialized:
+                    self.setup()
 
 
 class RMSTrigger(Trigger):
@@ -124,6 +165,9 @@ class RMSTrigger(Trigger):
         level_detector_args (`dict`, optional): Passed as keyword arguments to
             the internal `~.processors.LevelDetector`.
         **kwargs: Extra keyword arguments passed to `Trigger`.
+
+    Todo:
+        Rename region to slope?
     """
     def __init__(self, level, channel, region='Above', level_detector_args=None, **kwargs):
         super().__init__(**kwargs)
@@ -140,7 +184,13 @@ class RMSTrigger(Trigger):
     def test(self, frame):
         # logger.debug('Testing in RMS trigger')
         levels = self.level_detector(frame)
-        return any(self._sign * levels > self.trigger_level * self._sign)
+        return self._sign * levels >= self.trigger_level * self._sign
+        # meets_criteria = self._sign * levels > self.trigger_level * self._sign
+        # if any(meets_criteria):
+            # self.trigger_alignment = np.where(meets_criteria)[0][0]
+            # return True
+        # else:
+            # return False
 
     def reset(self):
         super().reset()
@@ -175,6 +225,9 @@ class PeakTrigger(Trigger):
             happens when the detected level rises above or falls below the set
             level, default ``'Above'``.
         **kwargs: Extra keyword arguments passed to `Trigger`.
+
+    Todo:
+        Rename region to slope?
     """
     def __init__(self, level, channel, region='Above', **kwargs):
         super().__init__(**kwargs)
@@ -185,7 +238,8 @@ class PeakTrigger(Trigger):
     def test(self, frame):
         # logger.debug('Testing in Peak triggger')
         levels = np.abs(frame[self.channel])
-        return any(self._sign * levels > self.trigger_level * self._sign)
+        return self._sign * levels >= self.trigger_level * self._sign
+        # return any(self._sign * levels > self.trigger_level * self._sign)
 
     @property
     def region(self):
@@ -214,16 +268,21 @@ class DelayedAction:
     Arguments:
         action (callable): Any callable action. This can be a callable class,
             a user defined funciton, or a method of another class.
-            If several actions are required, create a lambda that calls all
-            actions when called.
+            If several actions are required, pass an iterable of callables.
         time (`float`): The delay time, in seconds.
     """
+
     def __init__(self, action, time):
-        self.action = action
+        actions = []
+        try:
+            actions.extend(action)
+        except TypeError:
+            actions.append(action)
+        self.actions = actions
         self.time = time
         # self.timer = Timer(interval=time, function=action)
 
     def __call__(self):
-        timer = threading.Timer(interval=self.time, function=self.action)
+        timer = threading.Timer(interval=self.time, function=lambda: [action() for action in self.actions])
         timer.start()
         # self.timer.start()

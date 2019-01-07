@@ -1,3 +1,4 @@
+import warnings
 import queue
 import threading
 # import multiprocessing
@@ -7,6 +8,7 @@ from . import utils
 import json
 from .generators import GeneratorStop
 from .processors import LevelDetector
+from .distributors import QDistributor
 
 
 class Device:
@@ -27,11 +29,20 @@ class Device:
         max_inputs (`int`): The maximum number of inputs available.
         max_outputs (`int`): The maximum number of outputs available.
         calibrations (`numpy.ndarray`): Calibrations of input channels, defaults to 1 for missing calibrations.
+
+    Todo:
+        Remove the `add_trigger`, `remove_trigger`, `add_distributor`, `remove_distributor` and possibly
+        `add_generator` and `remove_generator`. Since these other objets will (almost) always have a single device
+        which devines the input data for the object it would be reasonable to have said device as a property of that
+        object. The code to manage adding/removing from the device will then be implenented in those objects. This
+        wil in the long run reduce the number of calls, since the device can be given as an input argument when creating
+        the objects. It also allows subclasses to customize how the objects are added to the device.
+
     """
-    _generator_timeout = 1
-    _trigger_timeout = 1
-    _q_timeout = 1
-    _hardware_timeout = 1
+    _generator_timeout = 1e-3
+    _trigger_timeout = 1e-3
+    _q_timeout = 1e-3
+    _hardware_timeout = 1e-3
 
     def __init__(self, **kwargs):
         # self.input_active = multiprocessing.Event()
@@ -44,7 +55,7 @@ class Device:
 
         self.__generators = []
         self.__triggers = []
-        self.__Qs = []
+        self.__output_triggers = []
         self.__distributors = []
 
         # self.__main_stop_event = multiprocessing.Event()
@@ -52,8 +63,13 @@ class Device:
         # self.__main_thread = multiprocessing.Process()
         self.__main_thread = threading.Thread()
 
-    def start(self):
-        """Starts the device.
+        kwargs.setdefault('fs', 1)  # This is required for all devices
+        kwargs.setdefault('framesize', 1)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def initialize(self):
+        """Initializes the device.
 
         This creates the connections between the hardware and the software,
         configures the hardware, and initializes triggers and generators.
@@ -68,8 +84,8 @@ class Device:
 
         self.__main_thread.start()
 
-    def stop(self):
-        """Stops the device.
+    def terminate(self):
+        """Terminates the device.
 
         Use this to turn off or disconnect a device safely after a measurement.
         It is not recommended to use this as deactivation control, i.e. you should
@@ -99,6 +115,36 @@ class Device:
         """
         if index not in self.outputs and index < self.max_outputs:
             self.outputs.append(Channel(index, 'output', **kwargs))
+
+    @property
+    def pre_triggering(self):
+        try:
+            return self._pre_triggering
+        except AttributeError:
+            self._pre_triggering = 0
+            return self.pre_triggering
+
+    @pre_triggering.setter
+    def pre_triggering(self, val):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to change the pre-triggering time while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self._pre_triggering = val
+
+    @property
+    def post_triggering(self):
+        try:
+            return self._post_triggering
+        except AttributeError:
+            self._post_triggering = 0
+            return self.post_triggering
+
+    @post_triggering.setter
+    def post_triggering(self, val):
+        if self.__main_thread.is_alive():
+            raise UserWarning('It is not possible to change the post-triggering time while the device is running. Stop the device and perform all setup before starting.')
+        else:
+            self._post_triggering = val
 
     @property
     def calibrations(self):
@@ -153,19 +199,18 @@ class Device:
         raise NotImplementedError('Required method `_hardware_run` not implemented in {}'.format(self.__class__.__name__))
 
     def flush(self):
-        """Used to flush all Qs.
+        """Used to flush the internal data.
 
         This can be useful if a measurement needs to be discarded.
         Data that have been removed from the queues, e.g. automatic file writers,
         will not be interfered with.
 
         Note:
-            This will delete data which is still in the queues!
+            This will delete data which is still in the stored!
         """
-        for q in self.__Qs:
-            utils.flush_Q(q)
+        self.__internal_distributor.flush()
 
-    def input_data(self):
+    def get_input_data(self, blocking=True, timeout=-1):
         """Collects the acquired input data.
 
         Data in stored internally in the `Device` object while input is active.
@@ -177,10 +222,19 @@ class Device:
             Has the shape (n_inputs, n_samples), and the input channels are
             ordered in the same order as they were added.
         """
-        if self.input_active.is_set():
-            print('It is not safe to get all data while input is active!')
+        do_relese = self.__input_data_lock.acquire(blocking=blocking, timeout=timeout)
+        try:
+            data = self.__internal_distributor.data
+        except AttributeError:
+            raise ValueError('Cannot get input data from uninitialized device!')
+        except ValueError:
+            raise ValueError('No input data to get!')
         else:
-            return utils.concatenate_Q(self.__internal_input_Q)
+            return data
+        finally:
+            if do_relese:
+                self.__input_data_lock.release()
+
 
     def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
         """Calibrates a channel using a reference signal.
@@ -211,142 +265,9 @@ class Device:
         channel.calibration = detector.current_level / value
         channel.unit = unit
 
-    def _register_input_Q(self, Q=None):
-        """Registers new input Q.
-
-        This should be used to register a queue used by a Distributor. The
-        queue will receive frames read while the input is active.
-        For memory efficiency the input frames are not copied to individual
-        queues, so in-place operations are not safe. If a Distributor needs
-        to manipulate the data a copy should be made before manipulation.
-
-        Arguments:
-            Q (`~queue.Queue`, optional): The Q to register. Will be created if equal to `None`
-        Returns:
-            `~queue.Queue`: The registered Q.
-        Note:
-            The frames are NOT copied to multiple queues!
-        Todo:
-            Give a warning instead of an error while running.
-
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to register new Qs while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            # Q = multiprocessing.Queue()
-            if Q is None:
-                Q = queue.Queue()
-            self.__Qs.append(Q)
-            return Q
-
-    def _unregister_input_Q(self, Q):
-        """Unregisters input Q.
-
-        Removes a queue from the list of queues that receive input data.
-        This method should be used by a Distributor if it is removed from
-        the Device.
-
-        Arguments:
-            Q (`~queue.Queue`): The Q to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove Qs while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__Qs.remove(Q)
-
-    def add_distributor(self, distributor):
-        """Adds a Distributor to the Device.
-
-        Arguments:
-            distributor: The distributor to add.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add distributors while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__distributors.append(distributor)
-            distributor.device = self
-
-    def remove_distributor(self, distributor):
-        """Removes a Distributor from the Device.
-
-        Arguments:
-            distributor: The distributor to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove distributors while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__distributors.remove(distributor)
-            try:
-                distributor.remove(self)
-            except AttributeError:
-                distributor.device = None
-
-    def add_trigger(self, trigger):
-        """Adds a Trigger to the Device.
-
-        Arguments:
-            trigger: The trigger to add.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add new triggers while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__triggers.append(trigger)
-            trigger.device = self
-
-    def remove_trigger(self, trigger):
-        """Removes a Trigger from the Device.
-
-        Arguments:
-            trigger: The trigger to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to remove triggers while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__triggers.remove(trigger)
-            trigger.device = None
-
-    def add_generator(self, generator):
-        """Adds a Generator to the Device.
-
-        Arguments:
-            generator: The generator to add.
-        Note:
-            The order that multiple generators are added to a device
-            dictates which output channel receives data from which generator.
-            The total number of generated channels must match the number of
-            output channels.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__generators.append(generator)
-            generator.device = self
-
-    def remove_generator(self, generator):
-        """Removes a Generator from the Device.
-
-        Arguments:
-            generator: The generator to remove.
-        Todo:
-            Give a warning instead of an error while running.
-        """
-        if self.__main_thread.is_alive():
-            raise UserWarning('It is not possible to add new generators while the device is running. Stop the device and perform all setup before starting.')
-        else:
-            self.__generators.remove(generator)
-            generator.device = None
+    @property
+    def initialized(self):
+        return self.__main_thread.is_alive()
 
     def __reset(self):
         """Resets the `Device`.
@@ -361,13 +282,13 @@ class Device:
 
         """
         self.__main_stop_event.clear()
-        self.__trigger_stop_event.clear()
-        self.__q_stop_event.clear()
         self._hardware_stop_event.clear()
         for trigger in self.__triggers:
             trigger.reset()
         for generator in self.__generators:
             generator.reset()
+        for distributor in self.__distributors:
+            distributor.reset()
         self.input_active.clear()
         self.output_active.clear()
 
@@ -384,37 +305,47 @@ class Device:
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
-        self._hardware_output_Q = queue.Queue(maxsize=25)
+        self._hardware_output_Q = MasterSlaveQueue(maxsize=2)
+        self.__input_data_lock = threading.Lock()
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
-        self.__internal_input_Q = queue.Queue()
-        self.__Qs.append(self.__internal_input_Q)
+        try:
+            if self.__internal_distributor is None:
+                raise AttributeError
+        except AttributeError:
+            with warnings.catch_warnings() as w:
+                warnings.filterwarnings('ignore', module='acoustics_hardware.distributors')
+                self.__internal_distributor = QDistributor(device=self)
+
         self.__generator_stop_event = threading.Event()
-        self.__trigger_stop_event = threading.Event()
-        self.__q_stop_event = threading.Event()
+
+
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
         generator_thread = threading.Thread(target=self.__generator_target)
+        output_trigger_thread = threading.Thread(target=self.__output_trigger_target)
         hardware_thread = threading.Thread(target=self._hardware_run)
         trigger_thread = threading.Thread(target=self.__trigger_target)
-        q_thread = threading.Thread(target=self.__q_target)
+        distributor_thread = threading.Thread(target=self.__distributor_target)
 
         generator_thread.start()
+        output_trigger_thread.start()
         hardware_thread.start()
         trigger_thread.start()
-        q_thread.start()
+        distributor_thread.start()
 
         self.__main_stop_event.wait()
+        self._hardware_stop_event.set()
+        hardware_thread.join()
 
         self.__generator_stop_event.set()
         generator_thread.join()
-        self._hardware_stop_event.set()
-        hardware_thread.join()
-        self.__trigger_stop_event.set()
+        output_trigger_thread.join()
+
+        self._hardware_input_Q.put(False)
         trigger_thread.join()
-        self.__q_stop_event.set()
-        q_thread.join()
+        distributor_thread.join()
         self.__reset()
 
     def __trigger_target(self):
@@ -424,73 +355,104 @@ class Device:
         for managing the attached triggers, and handling input data.
 
         Todo:
-            - Pre-triggering using appropriate values
-            - Post-triggering
-            - Aligning triggers?
+            - Make sure that the sample level triggering works on real hardware
+            - Process the remaining frames after the hardware thread has stopped
+            - Alignment is a temporary fix, and will not work across multiple devices
         """
-        data_buffer = collections.deque(maxlen=10)
+        pre_trigger_samples = int(np.ceil(self.pre_triggering * self.fs))
+        post_trigger_samples = int(np.ceil(self.post_triggering * self.fs))
+        remaining_samples = 0
+        data_buffer = collections.deque(maxlen=pre_trigger_samples // self.framesize + 2)
+        triggered = False
+        collecting_input = False
+        self._trigger_alignment = 0
+
         for trigger in self.__triggers:
             trigger.setup()
 
-        while not self.__trigger_stop_event.is_set():
+        while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
                 this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
             except queue.Empty:
                 continue
+            if this_frame is False:
+                # Stop signal
+                self._hardware_input_Q.task_done()    
+                break
             # Execute all triggering conditions
             scaled_frame = self._input_scaling(this_frame)
             for trig in self.__triggers:
                 trig(scaled_frame)
+            self._hardware_input_Q.task_done()
+
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
-            if self.input_active.is_set():
-                while len(data_buffer) > 0:
-                    self.__triggered_q.put(data_buffer.popleft())
+            if self.input_active.is_set() and not triggered:
+                collecting_input = self.__input_data_lock.acquire()
+                # Triggering happened between this frame and the last, do pre-prigger aligniment
+                triggered = True
+                trigger_sample_index = int(self._trigger_alignment * self.fs) + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
+                while trigger_sample_index > 0:
+                    if trigger_sample_index >= self.framesize:
+                        data_buffer.popleft()
+                    else:
+                        self.__triggered_q.put(data_buffer.popleft()[..., trigger_sample_index:])
+                    trigger_sample_index -= self.framesize
+                remaining_samples = len(data_buffer) * self.framesize
+            elif self.input_active.is_set():
+                # Continue miving data to triggered Q
+                remaining_samples += self.framesize
+            elif not self.input_active.is_set() and triggered:
+                # Just detriggered, set remaining samples correctly
+                triggered = False
+                remaining_samples = post_trigger_samples + int(self._trigger_alignment * self.fs) + 1
 
-        # The hardware should have stopped by now, analyze all remaining frames.
-        while True:
-            try:
-                this_frame = self._hardware_input_Q.get(timeout=self._trigger_timeout)
-            except queue.Empty:
-                break
-            scaled_frame = self._input_scaling(this_frame)
-            for trig in self.__triggers:
-                trig(scaled_frame)
-            data_buffer.append(this_frame)
-            if self.input_active.is_set():
-                while len(data_buffer) > 0:
-                    self.__triggered_q.put(data_buffer.popleft())
+            while remaining_samples > 0:
+                try:
+                    frame = data_buffer.popleft()
+                except IndexError:
+                    break
+                self.__triggered_q.put(frame[..., :remaining_samples])
+                remaining_samples -= frame.shape[-1]
+            else:
+                if collecting_input and not triggered:
+                    self.__input_data_lock.release()
+                    collecting_input = False
 
-    def __q_target(self):
+        self.__triggered_q.put(False)  # Signal the q-handler thread to stop
+
+    def __distributor_target(self):
         """Queue handling method.
 
         This method will execute as a subthread in the device, responsible
         for moving data from the input (while active) to the queues used by
         Distributors.
+
+        Todo:
+            Redo the framework for Qs and distributors. If Distributors are made
+            callable, we would just call all distributors with the frame. If a
+            distributors needs a Q and runs some expensive processing in a different
+            thread, is is easy to implement a call function for taking the frame
+            and putting it in a Q owned by the distributor.
         """
         for distributor in self.__distributors:
             distributor.setup()
 
-        while not self.__q_stop_event.is_set():
+        while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
                 this_frame = self.__triggered_q.get(timeout=self._q_timeout)
             except queue.Empty:
                 continue
-            for Q in self.__Qs:
+            for distributor in self.__distributors:
                 # Copy the frame to all output Qs
-                Q.put(this_frame)
-
-        # The triggering should have stopped by now, move the remaining frames.
-        while True:
-            try:
-                this_frame = self.__triggered_q.get(timeout=self._q_timeout)
-            except queue.Empty:
+                distributor(this_frame)
+            self.__triggered_q.task_done()
+            if this_frame is False:
+                # Signal to stop, we have sent it to all distributors if they need it
                 break
-            for Q in self.__Qs:
-                Q.put(this_frame)
 
     def __generator_target(self):
         """Generator handling method.
@@ -503,17 +465,67 @@ class Device:
             generator.setup()
         use_prev_frame = False
         while not self.__generator_stop_event.is_set():
-            if self.output_active.wait(timeout=self._generator_timeout):
+            if self.output_active.is_set():
                 try:
                     if not use_prev_frame:
                         frame = np.concatenate([generator() for generator in self.__generators])
-                except GeneratorStop:
+                except (GeneratorStop, ValueError):
                     self.output_active.clear()
                     continue
-                try:
-                    self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
-                except queue.Full:
-                    use_prev_frame = True
+            else:
+                frame = np.zeros((len(self.outputs), self.framesize))
+            try:
+                self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
+            except queue.Full:
+                use_prev_frame = True
+            else:
+                use_prev_frame = False
+
+        # Clear out the output Q to halt the output trigger thread
+        while True:
+            try:
+                self._hardware_output_Q.get_nowait()
+                self._hardware_output_Q.task_done()
+            except queue.Empty:
+                break
+        self._hardware_output_Q.put(False)
+        self._hardware_output_Q.task_done()
+
+    def __output_trigger_target(self):
+        for trig in self.__output_triggers:
+            trig.setup()
+
+        while True:
+            frame = self._hardware_output_Q.get_slave()
+            if frame is False:
+                self._hardware_output_Q.slave_task_done()
+                break
+            for trig in self.__output_triggers:
+                trig(frame)
+            self._hardware_output_Q.slave_task_done()
+
+class MasterSlaveQueue(queue.Queue):
+    def __init__(self, *args, slaves=1, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self._slave = queue.Queue()
+        self._counter = threading.Semaphore(0)
+
+    def task_done(self):
+        super().task_done()
+        self._counter.release()
+
+    def slave_task_done(self):
+        self._slave.task_done()
+
+    def get_slave(self, block=True, timeout=None):
+        self._counter.acquire(blocking=block, timeout=timeout)
+        return self._slave.get_nowait()
+
+    def put(self, item, block=True, timeout=None):
+        super().put(item, block=block, timeout=timeout)
+        self._slave.put(item)
+
 
 
 class Channel(int):

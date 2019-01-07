@@ -2,6 +2,7 @@ import numpy as np
 from numpy.fft import rfft as fft, irfft as ifft
 from scipy.signal import waveforms, max_len_seq
 import queue
+import warnings
 from . import utils
 
 
@@ -46,11 +47,24 @@ class Generator:
 
     @property
     def device(self):
-        return self._device
+        try:
+            return self._device
+        except AttributeError:
+            return None
 
     @device.setter
     def device(self, dev):
+        if self.device is not None:
+            # Unregister from the previous device
+            if self.device.initialized:
+                self.reset()
+            self.device._Device__generators.remove(self)
         self._device = dev
+        if self.device is not None:
+            # Register to the new device
+            self.device._Device__generators.append(self)
+            if self.device.initialized:
+                self.setup()
 
 
 class GeneratorStop(Exception):
@@ -210,7 +224,7 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
     def setup(self):
         super().setup()
         self.sequence, state = max_len_seq(self.order)
-        self.signal = 1 - 2 * self.sequence
+        self.signal = (1 - 2 * self.sequence).astype('float64')
 
 
 class FunctionGenerator(Generator):
@@ -417,3 +431,18 @@ class NoiseGenerator(Generator):
             self._method = val.lower()
         else:
             raise KeyError('Unknown generation method `{}`'.format(val))
+
+
+class IndexGenerator(Generator):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.index = 0
+
+    def frame(self):
+        frame = np.arange(self.index, self.index + self.device.framesize)
+        self.index += self.device.framesize
+        return frame
+
+    def reset(self):
+        super().reset()
+        self.index = 0
