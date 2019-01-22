@@ -4,10 +4,10 @@ import threading
 # import multiprocessing
 import collections
 import numpy as np
+import scipy.signal
 from . import utils
 import json
 from .generators import GeneratorStop
-from .processors import LevelDetector
 from .distributors import QDistributor
 
 
@@ -256,13 +256,19 @@ class Device:
             - Average over multiple parts
             - Determine a reasonable value of the averaging coefficient
         """
-        detector = LevelDetector(device=self, channel=channel, time_constant=12/frequency)
-        timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(detector,))
-        self.__triggers.append(detector)
+        q = QDistributor()
+        timer = threading.Timer(interval=3, function=lambda x: self.__triggers.remove(x), args=(q,))
+        self.__triggers.append(q)
         timer.start()
         timer.join()
+        
+        wn = frequency * np.array([0.9, 1.1]) / self.fs * 2
+        sos = scipy.signal.iirfilter(8, wn, output='sos')
+        data = q.data[channel]
+        data = scipy.signal.sosfilt(sos, data)
+        
         channel = self.inputs[self.inputs.index(channel)]
-        channel.calibration = detector.current_level / value
+        channel.calibration = np.std(data) / value
         channel.unit = unit
 
     @property
@@ -378,7 +384,7 @@ class Device:
                 continue
             if this_frame is False:
                 # Stop signal
-                self._hardware_input_Q.task_done()    
+                self._hardware_input_Q.task_done()
                 break
             # Execute all triggering conditions
             scaled_frame = self._input_scaling(this_frame)
@@ -421,6 +427,8 @@ class Device:
                     self.__input_data_lock.release()
                     collecting_input = False
 
+        if self.__input_data_lock.locked():
+            self.__input_data_lock.release()
         self.__triggered_q.put(False)  # Signal the q-handler thread to stop
 
     def __distributor_target(self):

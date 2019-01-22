@@ -80,7 +80,7 @@ class LevelDetector(Processor):
 
     @property
     def current_level(self):
-        return self._buffer**0.5
+        return self._buffer[0]**0.5
 
 
 def deconvolve(input, output, fs=None, f_low=None, f_high=None, T=None, filter_args=None):
