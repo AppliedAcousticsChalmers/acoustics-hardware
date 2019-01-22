@@ -95,6 +95,26 @@ class Device:
         self.__main_stop_event.set()
         # self.__process.join(timeout=10)
 
+    def start(self, timed=False, input=True, output=True, blocking=False):
+        if not self.initialized:
+            self.initialize()
+        if timed:
+            timer = threading.Timer(interval=timed, function=self.stop, kwargs={"input":input, "output":output})
+            timer.start()
+
+        if input:
+            self.input_active.set()
+        if output:
+            self.output_active.set()
+        if blocking:
+            timer.join()
+
+    def stop(self, input=True, output=True):
+        if input:    
+            self.input_active.clear()
+        if output:
+            self.output_active.clear()
+
     def add_input(self, index, **kwargs):
         """Adds a new input `Channel`.
 
