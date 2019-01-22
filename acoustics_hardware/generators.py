@@ -342,7 +342,7 @@ class NoiseGenerator(Generator):
                  ar_order=63, **kwargs):
         super().__init__(**kwargs)
         self.method = method
-        self.ar_order = 63
+        self.ar_order = ar_order
         self.color = color
 
     def _fft_noise(self):
