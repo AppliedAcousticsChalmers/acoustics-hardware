@@ -360,12 +360,11 @@ class NoiseGenerator(Generator):
 
     def _ar_noise(self):
         normal = np.random.normal(size=self.device.framesize)
-        shaped = np.zeros(shape=self.device.framesize)
-        for idx in range(self.device.framesize):
-            shaped[idx] = normal[idx] - (self._ar_coefficients * self._ar_buffer).sum()
+        for n in normal:
+            n -= np.dot(self._ar_coefficients, self._ar_buffer)
             self._ar_buffer = np.roll(self._ar_buffer, 1)
-            self._ar_buffer[0] = shaped[idx]
-        return shaped
+            self._ar_buffer[0] = n
+        return normal
 
     def _ar_setup(self):
         self._ar_buffer = np.zeros(self.ar_order - 1)
