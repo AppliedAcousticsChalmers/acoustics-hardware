@@ -1,6 +1,6 @@
 import logging
 
-__version__ = '0.0.4'
+__version__ = '0.1.0'
 logger = logging.getLogger(__name__)
 
 __all__ = ['core',
