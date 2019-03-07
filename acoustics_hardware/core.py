@@ -110,7 +110,7 @@ class Device:
             timer.join()
 
     def stop(self, input=True, output=True):
-        if input:    
+        if input:
             self.input_active.clear()
         if output:
             self.output_active.clear()
@@ -255,7 +255,6 @@ class Device:
             if do_relese:
                 self.__input_data_lock.release()
 
-
     def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
         """Calibrates a channel using a reference signal.
 
@@ -281,12 +280,12 @@ class Device:
         self.__triggers.append(q)
         timer.start()
         timer.join()
-        
+
         wn = frequency * np.array([0.9, 1.1]) / self.fs * 2
         sos = scipy.signal.iirfilter(8, wn, output='sos')
         data = q.data[channel]
         data = scipy.signal.sosfilt(sos, data)
-        
+
         channel = self.inputs[self.inputs.index(channel)]
         channel.calibration = np.std(data) / value
         channel.unit = unit
@@ -295,28 +294,30 @@ class Device:
     def initialized(self):
         return self.__main_thread.is_alive()
 
-    def __reset(self):
+    def reset(self, triggers=True, generators=True, distributors=True):
         """Resets the `Device`.
 
-        Performs a number of tasks required to restart a device after it has
-        been stopped:
+        Resets the attached objets of the device. Note that triggers will reset
+        the triggers which are attached to this device, which may or may not be the
+        same triggers used to trigger this device.
 
-        - Clears all stop events
-        - Resets all triggers
-        - Resets all generators
-        - Clears input and output activation
+        Arguments:
+            triggers (`bool`): Whether to reset the triggers, default True.
+            generators (`bool`): Whether to reset the generators, default True.
+            distributors (`bool`): Whether to reset the distributors, default True.
 
         """
         self.__main_stop_event.clear()
         self._hardware_stop_event.clear()
-        for trigger in self.__triggers:
-            trigger.reset()
-        for generator in self.__generators:
-            generator.reset()
-        for distributor in self.__distributors:
-            distributor.reset()
-        self.input_active.clear()
-        self.output_active.clear()
+        if triggers:
+            for trigger in self.__triggers:
+                trigger.reset()
+        if generators:
+            for generator in self.__generators:
+                generator.reset()
+        if distributors:
+            for distributor in self.__distributors:
+                distributor.reset()
 
     def _Device__main_target(self):
         """Main method for a Device.
@@ -345,7 +346,6 @@ class Device:
 
         self.__generator_stop_event = threading.Event()
 
-
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
@@ -372,7 +372,8 @@ class Device:
         self._hardware_input_Q.put(False)
         trigger_thread.join()
         distributor_thread.join()
-        self.__reset()
+        self.stop()
+        self.reset()
 
     def __trigger_target(self):
         """Trigger handling method.
@@ -532,6 +533,7 @@ class Device:
                 trig(frame)
             self._hardware_output_Q.slave_task_done()
 
+
 class MasterSlaveQueue(queue.Queue):
     def __init__(self, *args, slaves=1, **kwargs):
         super().__init__(*args, **kwargs)
@@ -553,7 +555,6 @@ class MasterSlaveQueue(queue.Queue):
     def put(self, item, block=True, timeout=None):
         super().put(item, block=block, timeout=timeout)
         self._slave.put(item)
-
 
 
 class Channel(int):
