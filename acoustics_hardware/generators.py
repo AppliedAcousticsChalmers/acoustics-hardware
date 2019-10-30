@@ -237,11 +237,13 @@ class SweepGenerator(ArbitrarySignalGenerator):
 
         def deconvolve(self, *args, **kwargs):
             if len(args) == 2:
-                kwargs['input'] = args[0]
+                kwargs['reference'] = args[0]
                 kwargs['output'] = args[1]
             if len(args) == 1:
                 kwargs['output'] = args[0]
-            kwargs.setdefault('input', self.signal)
+            if 'reference' not in kwargs:
+                kwargs['reference'] = self.signal
+                kwargs.setdefault('method', 'analytic')
             kwargs.setdefault('fs', self.device.fs)
             kwargs.setdefault('f_low', min(self.start_frequency, self.stop_frequency))
             kwargs.setdefault('f_high', max(self.start_frequency, self.stop_frequency))
@@ -263,12 +265,45 @@ class SweepGenerator(ArbitrarySignalGenerator):
         self.signal = signal
 
     @classmethod
-    def deconvolve(cls, input, output, fs=None, f_low=None, f_high=None, T=None, fade_out=None, filter_args=None):
-        output = np.atleast_2d(output)
-        input = np.pad(input, (0, output.shape[1] - input.shape[0]), mode='constant')
-        TF = np.fft.rfft(output, axis=1) / np.fft.rfft(input)
+    def deconvolve(cls, reference, output, fs=None, f_low=None, f_high=None, T=None, fade_out=None, method='regularized', orders=0, **kwargs):
+        if method == 'filtering':
+            inverse_filter = cls._filtered_inverse(reference, fs=fs, f_low=f_low, f_high=f_high, **kwargs)
+        elif method == 'regularized':
+            inverse_filter = cls._regularized_inverse(reference, fs=fs, f_low=f_low, f_high=f_high, **kwargs)
+        elif method == 'analytic':
+            inverse_filter = cls._analytic_inverse(reference, fs=fs, f_low=f_low, f_high=f_high, **kwargs)
+        elif method=='time-reversal':
+            inverse_filter = cls._time_reversal_filter(reference, fs=fs, f_low=f_low, f_high=f_high, **kwargs)
+        else:
+            raise ValueError('Unknown method `{}`'.format(method))
 
-        filter_args = filter_args or {}
+        output = np.atleast_2d(output)
+        meas_length = output.shape[1]
+        TF = np.fft.rfft(output, n=2*meas_length, axis=-1) * np.fft.rfft(inverse_filter, n=2*meas_length)
+
+        ir_whole = np.fft.irfft(TF, axis=-1)
+        if orders == 'whole':
+            return np.squeeze(ir_whole)
+        ir = ir_whole[..., inverse_filter.size:]
+
+        if T is not None:
+            if fs is not None:
+                T = T * fs
+            ir = ir[..., :int(T)]
+        
+        if fade_out is not None and fade_out>0:
+            if fs is not None:
+                fade_out_samples = min(int(fade_out * fs), ir.shape[-1])
+            fade_out = np.sin(np.linspace(np.pi/2, 0, fade_out_samples))**2
+            ir[..., -fade_out_samples:] *= fade_out
+
+        return np.squeeze(ir)
+
+    @classmethod
+    def _filtered_inverse(cls, reference, fs=None, f_low=None, f_high=None, **kwargs):
+        inverse_spectrum = 1 / np.fft.rfft(reference)
+
+        filter_args = kwargs or {}
         filter_args.setdefault('N', 8)
         if f_low is not None and f_high is not None:
             if fs is not None:
@@ -291,22 +326,56 @@ class SweepGenerator(ArbitrarySignalGenerator):
         filter_args['output'] = 'sos'
         if 'Wn' in filter_args:
             sos = scipy.signal.iirfilter(**filter_args)
-            _, H = scipy.signal.sosfreqz(sos, TF.shape[1])
-            TF = TF * H
-        ir = np.fft.irfft(TF, axis=1)
-        
-        if T is not None:
-            if fs is not None:
-                T = T * fs
-            ir = ir[:, :int(T)]
-        
-        if fade_out is not None and fade_out>0:
-            if fs is not None:
-                fade_out_samples = min(int(fade_out * fs), ir.shape[-1])
-            fade_out = np.sin(np.linspace(np.pi/2, 0, fade_out_samples))**2
-            ir[..., -fade_out_samples:] *= fade_out
+            _, H = scipy.signal.sosfreqz(sos, inverse_spectrum.size)
+            inverse_spectrum = inverse_spectrum * H
+        inverse_filter = np.fft.irfft(inverse_spectrum)
+        return inverse_filter
 
-        return np.squeeze(ir)
+    @classmethod
+    def _regularized_inverse(cls, reference, fs=None, f_low=None, f_high=None, width=1/12,
+                             interior_regularization=0.01, exterior_regulrization=1, **kwargs):
+        ref_spectrum = np.fft.rfft(reference)
+        fs = fs or 1
+        f_low = f_low or 0
+        f_high = f_high or fs/2
+        f_low_interior = f_low * 2**width
+        f_high_interior = f_high / 2**width
+        f = np.fft.rfftfreq(reference.size, 1/fs)
+
+        regularization = np.zeros(ref_spectrum.shape)
+        interior_idx = (f_low_interior <= f) & (f <= f_high_interior)
+        regularization[interior_idx] = 1/f[interior_idx] * interior_regularization
+        regularization[0] = 0
+        
+        regularization[f<=f_low] = exterior_regulrization / f_low
+        slope_idx = (f_low<f) & (f<f_low_interior)
+        regularization[slope_idx] = np.geomspace(exterior_regulrization / f_low, interior_regularization / f_low_interior, np.sum(slope_idx))
+
+        slope_idx = (f_high_interior<f) & (f<f_high)
+        regularization[f_high<=f] = exterior_regulrization / f_high
+        regularization[slope_idx] = np.geomspace(interior_regularization / f_high_interior, exterior_regulrization / f_high, np.sum(slope_idx))
+        
+        regularization *= np.mean(np.abs(ref_spectrum[interior_idx])**2 / regularization[interior_idx]) * interior_regularization
+        inverse_spectrum = ref_spectrum.conj() / (ref_spectrum.conj() * ref_spectrum + regularization)
+        inverse_filter = np.fft.irfft(inverse_spectrum)
+        return inverse_filter
+
+    @classmethod
+    def _analytic_inverse(cls, reference, fs, f_low=None, f_high=None, **kwargs):
+        T = reference.size / fs
+        phase_rate = T / np.log(f_high / f_low)
+        f = np.fft.rfftfreq(reference.size, 1/fs)
+        with np.errstate(divide='ignore'):
+            inverse_spectrum = 2 * (f / phase_rate)**0.5 * np.exp(-2j * np.pi * f * phase_rate * (1 - np.log(f / f_low)) + 1j * np.pi / 4)
+        inverse_spectrum[0] = 0
+        inverse_filter = np.fft.irfft(inverse_spectrum) / fs
+        return inverse_filter
+
+    @classmethod
+    def _time_reversal_filter(cls, reference, fs, f_low, f_high, **kwargs):
+        amplitude_correction = 10**(np.linspace(0, -6 * np.log2(f_high/f_low), reference.size) / 20)
+        inverse_filter = reference[-1::-1] * amplitude_correction
+        return inverse_filter
 
 
 class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
