@@ -3,6 +3,7 @@ from numpy.fft import rfft as fft, irfft as ifft
 import scipy.signal
 import queue
 import warnings
+import functools
 from . import utils
 
 
@@ -233,6 +234,19 @@ class SweepGenerator(ArbitrarySignalGenerator):
         self.duration = duration
         self.method = method
         self.bidirectional = bidirectional
+
+        def deconvolve(self, *args, **kwargs):
+            if len(args) == 2:
+                kwargs['input'] = args[0]
+                kwargs['output'] = args[1]
+            if len(args) == 1:
+                kwargs['output'] = args[0]
+            kwargs.setdefault('input', self.signal)
+            kwargs.setdefault('fs', self.device.fs)
+            kwargs.setdefault('f_low', min(self.start_frequency, self.stop_frequency))
+            kwargs.setdefault('f_high', max(self.start_frequency, self.stop_frequency))
+            return SweepGenerator.deconvolve(**kwargs)
+        self.deconvolve = functools.partial(deconvolve, self)
 
     def setup(self):
         super().setup()
