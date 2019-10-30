@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.fft import rfft as fft, irfft as ifft
-from scipy.signal import waveforms, max_len_seq
+import scipy.signal
 import queue
 import warnings
 from . import utils
@@ -237,13 +237,13 @@ class SweepGenerator(ArbitrarySignalGenerator):
     def setup(self):
         super().setup()
         time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
-        signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
+        signal = scipy.signal.waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
         if self.bidirectional:
             signal = np.concatenate([signal, signal[::-1]])
         self.signal = signal
 
     @classmethod
-    def deconvolve(cls, input, output, fs=None, f_low=None, f_high=None, T=None, filter_args=None):
+    def deconvolve(cls, input, output, fs=None, f_low=None, f_high=None, T=None, fade_out=None, filter_args=None):
         output = np.atleast_2d(output)
         input = np.pad(input, (0, output.shape[1] - input.shape[0]), mode='constant')
         TF = np.fft.rfft(output, axis=1) / np.fft.rfft(input)
@@ -255,18 +255,37 @@ class SweepGenerator(ArbitrarySignalGenerator):
                 f_low = f_low / fs * 2
                 f_high = f_high / fs * 2
             filter_args.setdefault('Wn', (f_low, f_high))
+            filter_args['btype'] = 'bandpass'
+        elif f_low is not None:
+            if fs is not None:
+                f_low = f_low / fs * 2
+            filter_args.setdefault('Wn', f_low)
+            filter_args['btype'] = 'highpass'
+        elif f_high is not None:
+            if fs is not None:
+                f_high = f_high / fs * 2
+            filter_args.setdefault('Wn', f_high)
+            filter_args['btype'] = 'lowpass'
+        
         filter_args.setdefault('ftype', 'butter')
-        filter_args['btype'] = 'bandpass'
         filter_args['output'] = 'sos'
         if 'Wn' in filter_args:
             sos = scipy.signal.iirfilter(**filter_args)
             _, H = scipy.signal.sosfreqz(sos, TF.shape[1])
             TF = TF * H
         ir = np.fft.irfft(TF, axis=1)
+        
         if T is not None:
             if fs is not None:
                 T = T * fs
             ir = ir[:, :int(T)]
+        
+        if fade_out is not None and fade_out>0:
+            if fs is not None:
+                fade_out_samples = min(int(fade_out * fs), ir.shape[-1])
+            fade_out = np.sin(np.linspace(np.pi/2, 0, fade_out_samples))**2
+            ir[..., -fade_out_samples:] *= fade_out
+
         return np.squeeze(ir)
 
 
@@ -285,7 +304,7 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
 
     def setup(self):
         super().setup()
-        self.sequence, state = max_len_seq(self.order)
+        self.sequence, state = scipy.signal.max_len_seq(self.order)
         self.signal = (1 - 2 * self.sequence).astype('float64')
 
 
@@ -308,9 +327,9 @@ class FunctionGenerator(Generator):
         shape_kwargs (`dict`): Keyword arguments for shape function.
     """
     _functions = {
-        'sin': waveforms.sin,
-        'saw': waveforms.sawtooth,
-        'squ': waveforms.square
+        'sin': scipy.signal.waveforms.sin,
+        'saw': scipy.signal.waveforms.sawtooth,
+        'squ': scipy.signal.waveforms.square
     }
 
     def __init__(self, frequency, repetitions=np.inf,
