@@ -242,6 +242,33 @@ class SweepGenerator(ArbitrarySignalGenerator):
             signal = np.concatenate([signal, signal[::-1]])
         self.signal = signal
 
+    @classmethod
+    def deconvolve(cls, input, output, fs=None, f_low=None, f_high=None, T=None, filter_args=None):
+        output = np.atleast_2d(output)
+        input = np.pad(input, (0, output.shape[1] - input.shape[0]), mode='constant')
+        TF = np.fft.rfft(output, axis=1) / np.fft.rfft(input)
+
+        filter_args = filter_args or {}
+        filter_args.setdefault('N', 8)
+        if f_low is not None and f_high is not None:
+            if fs is not None:
+                f_low = f_low / fs * 2
+                f_high = f_high / fs * 2
+            filter_args.setdefault('Wn', (f_low, f_high))
+        filter_args.setdefault('ftype', 'butter')
+        filter_args['btype'] = 'bandpass'
+        filter_args['output'] = 'sos'
+        if 'Wn' in filter_args:
+            sos = scipy.signal.iirfilter(**filter_args)
+            _, H = scipy.signal.sosfreqz(sos, TF.shape[1])
+            TF = TF * H
+        ir = np.fft.irfft(TF, axis=1)
+        if T is not None:
+            if fs is not None:
+                T = T * fs
+            ir = ir[:, :int(T)]
+        return np.squeeze(ir)
+
 
 class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
     """Generation of maximum length sequences.
