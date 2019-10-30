@@ -128,9 +128,13 @@ class ArbitrarySignalGenerator(Generator):
     Keyword Arguments:
         signal (`numpy.ndarray`): One cycle of the signal to output.
     """
-    def __init__(self, repetitions=np.inf, **kwargs):
+    def __init__(self, repetitions=np.inf, fade_in=0, fade_out=0, pre_pad=0, post_pad=0, **kwargs):
         super().__init__(**kwargs)
         self.repetitions = repetitions  # Default to continious output
+        self.fade_in = fade_in
+        self.fade_out = fade_out
+        self.pre_pad = pre_pad
+        self.post_pad = post_pad
         self.reset()
 
     def frame(self):
@@ -155,6 +159,37 @@ class ArbitrarySignalGenerator(Generator):
         super().reset()
         self.idx = 0
         self.repetitions_done = 0
+
+    @property
+    def signal(self):
+        return self._signal
+    
+    @signal.setter
+    def signal(self, sig):
+        sig = np.array(sig) # Makes sure the input is a numpy array and makes a copy
+ 
+        # Checks the max length of the applied fades.
+        # If someone requests a longer fade than the signal, let them.
+        # The only thing that happens in that a fade in will not reach 1, and a fade out will start below 1
+        fade_in_samples = int(self.fade_in * self.device.fs)
+        if fade_in_samples > 0:
+            fade_in = np.sin(np.linspace(0, np.pi/2, fade_in_samples))**2
+            fade_in_samples = min(fade_in_samples, sig.shape[-1])
+            sig[..., :fade_in_samples] *= fade_in[:fade_in_samples]
+
+        fade_out_samples = int(self.fade_out * self.device.fs)
+        if fade_out_samples > 0:
+            fade_out = np.sin(np.linspace(np.pi/2, 0, fade_out_samples))**2
+            fade_out_samples = min(fade_out_samples, sig.shape[-1])
+            sig[..., -fade_out_samples:] *= fade_out[-fade_out_samples:]
+
+        pre_pad_samples = int(self.pre_pad * self.device.fs)
+        post_pad_samples = int(self.post_pad * self.device.fs)
+        pre_pad = np.zeros(sig.shape[:-1] + (pre_pad_samples,))
+        post_pad = np.zeros(sig.shape[:-1] + (post_pad_samples,))
+
+        self._signal = np.concatenate([pre_pad, sig, post_pad])
+
 
     def setup(self):
         """Configures the signal.
@@ -202,10 +237,10 @@ class SweepGenerator(ArbitrarySignalGenerator):
     def setup(self):
         super().setup()
         time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
-        self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
+        signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
         if self.bidirectional:
-            self.signal = np.concatenate([self.signal, self.signal[::-1]])
-            self.repetitions /= 2
+            signal = np.concatenate([signal, signal[::-1]])
+        self.signal = signal
 
 
 class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
