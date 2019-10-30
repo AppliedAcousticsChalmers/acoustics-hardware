@@ -251,9 +251,15 @@ class SweepGenerator(ArbitrarySignalGenerator):
     def setup(self):
         super().setup()
         time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
-        signal = scipy.signal.waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
+        phase_rate = self.duration / np.log(self.stop_frequency / self.start_frequency)
+        phase = 2 * np.pi * self.start_frequency * phase_rate * np.exp(time_vector / phase_rate)
+        signal = np.sin(phase)
         if self.bidirectional:
             signal = np.concatenate([signal, signal[::-1]])
+        last_zero_crossing = -1
+        while np.sign(signal[last_zero_crossing-1]) == np.sign(signal[-1]):
+            last_zero_crossing -= 1
+        signal[last_zero_crossing:] = 0
         self.signal = signal
 
     @classmethod
