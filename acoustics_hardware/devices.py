@@ -3,6 +3,9 @@ import numpy as np
 import sounddevice as sd
 from . import core
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     import nidaqmx
     import nidaqmx.stream_readers
@@ -70,15 +73,18 @@ class AudioDevice(core.Device):
         self._hardware_output_timeout = 0.5 * self.framesize / self.fs
         if num_input_ch and num_output_ch:
             # in/out stream
+            logger.debug('Creating input/output hardare')
             def callback(indata, outdata, frames, time, status):
                 self._input_callback(indata)
                 self._output_callback(outdata)
             stream = sd.Stream(device=self.name, samplerate=self.fs, blocksize=self.framesize, callback=callback, channels=(num_input_ch, num_output_ch))
         elif num_input_ch:
+            logger.debug('Creating input hardare')
             def callback(indata, frames, time, status):
                 self._input_callback(indata)
             stream = sd.InputStream(device=self.name, samplerate=self.fs, blocksize=self.framesize, callback=callback, channels=num_input_ch)
         elif len(self.outputs):
+            logger.debug('Creating output hardare')
             def callback(outdata, frames, time, status):
                 self._output_callback(outdata)
             stream = sd.OutputStream(device=self.name, samplerate=self.fs, blocksize=self.framesize, callback=callback, channels=num_output_ch)
@@ -87,6 +93,7 @@ class AudioDevice(core.Device):
             pass
 
         stream.start()
+        logger.verbose('Hardare running')
         self._hardware_stop_event.wait()
         stream.stop()
 
@@ -179,6 +186,7 @@ class NIDevice(core.Device):
         super().__init__(**kwargs)
         if name is None:
             name = NIDevice.get_devices()[0]
+        self.name = name
         self.chassis = self.get_chassis(name)
         self.modules = self.get_modules(self.chassis)
         self.input_modules = [module for module in self.modules if len(nidaqmx.system.Device(module).ai_physical_chans) > 0]
@@ -363,28 +371,33 @@ class NIDevice(core.Device):
                 return 0
             self._input_task.register_every_n_samples_acquired_into_buffer_event(self.framesize, input_callback)
             self._input_task.start()
+            logger.debug('Hardware input initialized')
 
         if len(self.outputs):
             writer = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream)
             write_funciton = writer.write_many_sample
             self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION  # Needed to prevent issues with buffer overwrites and reuse
             write_funciton(np.zeros((self._output_task.out_stream.num_chans, 2*self.framesize)))  # Pre-fill the buffer with zeros, there needs to be something in the buffer when we start
-            timeout = 0.95 * self.framesize / self.fs
+            timeout = 0.5 * self.framesize / self.fs
+            zero_frame = np.zeros((output_task.out_stream.num_chans, self.framesize))
 
             def output_callback(task_handle, every_n_samples_event_type,
                                 number_of_samples, callback_data):
                 try:
                     data = self._hardware_output_Q.get(timeout=timeout)
                 except queue.Empty:
-                    data = np.zeros((self._output_task.out_stream.num_chans, number_of_samples))
+                    data = zero_frame
+                    logger.frames('Hardware output Q empty')
                 else:
                     self._hardware_output_Q.task_done()
                 finally:
                     sampsWritten = write_funciton(data)
                 return 0
-            self._output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
-            self._output_task.start()
+            output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
+            output_task.start()
+            logger.debug('Hardware output initialized')
 
+        logger.verbose('Hardware running')
         self._hardware_stop_event.wait()
 
         self._input_task.stop()

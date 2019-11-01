@@ -7,9 +7,12 @@ import numpy as np
 import scipy.signal
 from . import utils
 import json
+import logging
 from .generators import GeneratorStop
 from .distributors import QDistributor
 
+
+logger = logging.getLogger(__name__)
 
 class Device:
     """Abstract class that provides a consistent framework for different hardware.
@@ -39,6 +42,7 @@ class Device:
         the objects. It also allows subclasses to customize how the objects are added to the device.
 
     """
+    __device_count = 0
     _generator_timeout = 1e-3
     _trigger_timeout = 1e-3
     _q_timeout = 1e-3
@@ -63,6 +67,9 @@ class Device:
         # self.__main_thread = multiprocessing.Process()
         self.__main_thread = threading.Thread()
 
+        self.__name = 'Device_{}'.format(Device.__device_count)
+        Device.__device_count += 1
+
         kwargs.setdefault('fs', 1)  # This is required for all devices
         kwargs.setdefault('framesize', 1)
         for key, value in kwargs.items():
@@ -80,7 +87,11 @@ class Device:
             This does NOT activate inputs or outputs!
         """
         # self.__main_thread = multiprocessing.Process(target=self._Device__main_target)
-        self.__main_thread = threading.Thread(target=self._Device__main_target)
+        try:
+            name = self.name + ' (' + self.__name + ')'
+        except AttributeError:
+            name = self.__name
+        self.__main_thread = threading.Thread(target=self._Device__main_target, name=name)
 
         self.__main_thread.start()
 
@@ -331,8 +342,9 @@ class Device:
         """
         # The explicit naming of this method is needed on windows for some stange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
+        logger.info('Device initializing')
         self._hardware_input_Q = queue.Queue()
-        self._hardware_output_Q = MasterSlaveQueue(maxsize=2)
+        self._hardware_output_Q = MasterSlaveQueue(maxsize=5)
         self.__input_data_lock = threading.Lock()
         self._hardware_stop_event = threading.Event()
         self.__triggered_q = queue.Queue()
@@ -349,18 +361,19 @@ class Device:
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
-        generator_thread = threading.Thread(target=self.__generator_target)
-        output_trigger_thread = threading.Thread(target=self.__output_trigger_target)
-        hardware_thread = threading.Thread(target=self._hardware_run)
-        trigger_thread = threading.Thread(target=self.__trigger_target)
-        distributor_thread = threading.Thread(target=self.__distributor_target)
-
+        name = self.__main_thread.name
+        generator_thread = threading.Thread(target=self.__generator_target, name=name + ' - generator')
+        output_trigger_thread = threading.Thread(target=self.__output_trigger_target, name=name + ' - outputtrigger')
+        hardware_thread = threading.Thread(target=self._hardware_run, name=name + ' - hardware')
+        trigger_thread = threading.Thread(target=self.__trigger_target, name=name + ' - trigger')
+        distributor_thread = threading.Thread(target=self.__distributor_target, name=name + ' - distributor')
         generator_thread.start()
         output_trigger_thread.start()
         hardware_thread.start()
         trigger_thread.start()
         distributor_thread.start()
 
+        logger.verbose('Device initialized')
         self.__main_stop_event.wait()
         self._hardware_stop_event.set()
         hardware_thread.join()
@@ -374,6 +387,7 @@ class Device:
         distributor_thread.join()
         self.stop()
         self.reset()
+        logger.verbose('Device terminated')
 
     def __trigger_target(self):
         """Trigger handling method.
@@ -393,10 +407,13 @@ class Device:
         triggered = False
         collecting_input = False
         self._trigger_alignment = 0
+        self.__hardware_input_frames = 0
+        self.__triggered_frames = 0
 
         for trigger in self.__triggers:
             trigger.setup()
 
+        logger.verbose('Triggers running')
         while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
@@ -412,11 +429,13 @@ class Device:
             for trig in self.__triggers:
                 trig(scaled_frame)
             self._hardware_input_Q.task_done()
+            self.__hardware_input_frames += 1
 
             # Move the frame to the buffer
             data_buffer.append(this_frame)
             # If the trigger is active, move everything from the data buffer to the triggered Q
             if self.input_active.is_set() and not triggered:
+                logger.debug('Input activated')
                 collecting_input = self.__input_data_lock.acquire()
                 # Triggering happened between this frame and the last, do pre-prigger aligniment
                 triggered = True
@@ -429,9 +448,10 @@ class Device:
                     trigger_sample_index -= self.framesize
                 remaining_samples = len(data_buffer) * self.framesize
             elif self.input_active.is_set():
-                # Continue miving data to triggered Q
+                # Continue moving data to triggered Q
                 remaining_samples += self.framesize
             elif not self.input_active.is_set() and triggered:
+                logger.debug('Input deactivated')
                 # Just detriggered, set remaining samples correctly
                 triggered = False
                 remaining_samples = post_trigger_samples + int(self._trigger_alignment * self.fs) + 1
@@ -442,6 +462,7 @@ class Device:
                 except IndexError:
                     break
                 self.__triggered_q.put(frame[..., :remaining_samples])
+                self.__triggered_frames += 1
                 remaining_samples -= frame.shape[-1]
             else:
                 if collecting_input and not triggered:
@@ -468,7 +489,9 @@ class Device:
         """
         for distributor in self.__distributors:
             distributor.setup()
+        self.__distributed_frames = 0
 
+        logger.verbose('Distributors running')
         while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
@@ -479,6 +502,7 @@ class Device:
                 # Copy the frame to all output Qs
                 distributor(this_frame)
             self.__triggered_q.task_done()
+            self.__distributed_frames += 1
             if this_frame is False:
                 # Signal to stop, we have sent it to all distributors if they need it
                 break
@@ -492,16 +516,31 @@ class Device:
         """
         for generator in self.__generators:
             generator.setup()
+        self.__generated_frames = 0
+        self.__hardware_output_frames = 0
+        generating = False
+
         use_prev_frame = False
+        logger.verbose('Generators running')
         while not self.__generator_stop_event.is_set():
             if self.output_active.is_set():
+                if not generating:
+                    # First frame generating
+                    generating = True
+                    logger.debug('Output activated')
                 try:
                     if not use_prev_frame:
                         frame = np.concatenate([generator() for generator in self.__generators])
+                        self.__generated_frames += 1
                 except (GeneratorStop, ValueError):
+                    logger.debug('Generator halted output')
                     self.output_active.clear()
                     continue
             else:
+                if generating:
+                    # First frame not generating
+                    generating = False
+                    logger.debug('Output deactivated')
                 frame = np.zeros((len(self.outputs), self.framesize))
             try:
                 self._hardware_output_Q.put(frame, timeout=self._generator_timeout)
@@ -509,12 +548,14 @@ class Device:
                 use_prev_frame = True
             else:
                 use_prev_frame = False
+                self.__hardware_output_frames += 1
 
         # Clear out the output Q to halt the output trigger thread
         while True:
             try:
                 self._hardware_output_Q.get_nowait()
                 self._hardware_output_Q.task_done()
+                self.__hardware_output_frames += 1
             except queue.Empty:
                 break
         self._hardware_output_Q.put(False)
@@ -524,6 +565,8 @@ class Device:
         for trig in self.__output_triggers:
             trig.setup()
 
+        self.__output_triggered_frames = 0
+        logger.verbose('Output triggers running')
         while True:
             frame = self._hardware_output_Q.get_slave()
             if frame is False:
@@ -532,6 +575,7 @@ class Device:
             for trig in self.__output_triggers:
                 trig(frame)
             self._hardware_output_Q.slave_task_done()
+            self.__output_triggered_frames += 1
 
 
 class MasterSlaveQueue(queue.Queue):

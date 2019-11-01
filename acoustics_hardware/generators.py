@@ -277,8 +277,8 @@ class SweepGenerator(ArbitrarySignalGenerator):
         else:
             raise ValueError('Unknown method `{}`'.format(method))
 
-        output = np.atleast_2d(output)
-        meas_length = output.shape[1]
+        output = np.asarray(output)
+        meas_length = output.shape[-1]
         TF = np.fft.rfft(output, n=2*meas_length, axis=-1) * np.fft.rfft(inverse_filter, n=2*meas_length)
 
         ir_whole = np.fft.irfft(TF, axis=-1)
@@ -365,7 +365,7 @@ class SweepGenerator(ArbitrarySignalGenerator):
         T = reference.size / fs
         phase_rate = T / np.log(f_high / f_low)
         f = np.fft.rfftfreq(reference.size, 1/fs)
-        with np.errstate(divide='ignore'):
+        with np.errstate(divide='ignore', invalid='ignore'):
             inverse_spectrum = 2 * (f / phase_rate)**0.5 * np.exp(-2j * np.pi * f * phase_rate * (1 - np.log(f / f_low)) + 1j * np.pi / 4)
         inverse_spectrum[0] = 0
         inverse_filter = np.fft.irfft(inverse_spectrum) / fs
