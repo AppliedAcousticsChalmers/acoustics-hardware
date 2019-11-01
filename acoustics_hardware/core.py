@@ -66,6 +66,8 @@ class Device:
         self.__main_stop_event = threading.Event()
         # self.__main_thread = multiprocessing.Process()
         self.__main_thread = threading.Thread()
+        self._sync_event = threading.Event()
+        self._initialized_event = threading.Event()
 
         self.__name = 'Device_{}'.format(Device.__device_count)
         Device.__device_count += 1
@@ -75,7 +77,7 @@ class Device:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def initialize(self):
+    def initialize(self, blocking=True):
         """Initializes the device.
 
         This creates the connections between the hardware and the software,
@@ -94,6 +96,8 @@ class Device:
         self.__main_thread = threading.Thread(target=self._Device__main_target, name=name)
 
         self.__main_thread.start()
+        if blocking:
+            self._initialized_event.wait()
 
     def terminate(self):
         """Terminates the device.
@@ -303,7 +307,7 @@ class Device:
 
     @property
     def initialized(self):
-        return self.__main_thread.is_alive()
+        return self._initialized_event.is_set()
 
     def reset(self, triggers=True, generators=True, distributors=True):
         """Resets the `Device`.
@@ -367,14 +371,31 @@ class Device:
         hardware_thread = threading.Thread(target=self._hardware_run, name=name + ' - hardware')
         trigger_thread = threading.Thread(target=self.__trigger_target, name=name + ' - trigger')
         distributor_thread = threading.Thread(target=self.__distributor_target, name=name + ' - distributor')
-        generator_thread.start()
-        output_trigger_thread.start()
-        hardware_thread.start()
-        trigger_thread.start()
-        distributor_thread.start()
 
+        self._sync_event.clear()
+        generator_thread.start()
+        self._sync_event.wait()
+
+        self._sync_event.clear()
+        output_trigger_thread.start()
+        self._sync_event.wait()
+        
+        self._sync_event.clear()
+        hardware_thread.start()
+        self._sync_event.wait()
+
+        self._sync_event.clear()
+        trigger_thread.start()
+        self._sync_event.wait()
+
+        self._sync_event.clear()
+        distributor_thread.start()
+        self._sync_event.wait()
+
+        self._initialized_event.set()
         logger.verbose('Device initialized')
         self.__main_stop_event.wait()
+        self._initialized_event.clear()
         self._hardware_stop_event.set()
         hardware_thread.join()
 
@@ -414,6 +435,7 @@ class Device:
             trigger.setup()
 
         logger.verbose('Triggers running')
+        self._sync_event.set()
         while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
@@ -492,6 +514,7 @@ class Device:
         self.__distributed_frames = 0
 
         logger.verbose('Distributors running')
+        self._sync_event.set()
         while True:
             # Wait for a frame, if none has arrived within the set timeout, go back and check stop condition
             try:
@@ -522,6 +545,7 @@ class Device:
 
         use_prev_frame = False
         logger.verbose('Generators running')
+        self._sync_event.set()
         while not self.__generator_stop_event.is_set():
             if self.output_active.is_set():
                 if not generating:
@@ -567,6 +591,7 @@ class Device:
 
         self.__output_triggered_frames = 0
         logger.verbose('Output triggers running')
+        self._sync_event.set()
         while True:
             frame = self._hardware_output_Q.get_slave()
             if frame is False:

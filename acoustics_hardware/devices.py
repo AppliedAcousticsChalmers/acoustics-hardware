@@ -94,6 +94,7 @@ class AudioDevice(core.Device):
 
         stream.start()
         logger.verbose('Hardare running')
+        self._sync_event.set()
         self._hardware_stop_event.wait()
         stream.stop()
 
@@ -398,14 +399,15 @@ class NIDevice(core.Device):
             logger.debug('Hardware output initialized')
 
         logger.verbose('Hardware running')
+        self._sync_event.set()
         self._hardware_stop_event.wait()
 
-        self._input_task.stop()
-        self._output_task.stop()
-        self._input_task.wait_until_done(timeout=10)
-        self._output_task.wait_until_done(timeout=10)
-        self._input_task.close()
-        self._output_task.close()
+        input_task.stop()
+        output_task.stop()
+        input_task.wait_until_done(timeout=10)
+        output_task.wait_until_done(timeout=10)
+        input_task.close()
+        output_task.close()
         self.reset_chassis_modules(self.chassis)
 
 
