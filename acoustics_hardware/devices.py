@@ -402,22 +402,28 @@ class NIDevice(core.Device):
         if len(self.outputs):
             writer = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream)
             write_funciton = writer.write_many_sample
-            self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION  # Needed to prevent issues with buffer overwrites and reuse
-            write_funciton(np.zeros((self._output_task.out_stream.num_chans, 2*self.framesize)))  # Pre-fill the buffer with zeros, there needs to be something in the buffer when we start
-            timeout = 0.5 * self.framesize / self.fs
+            # self._output_task.out_stream.regen_mode: this controlls what happens when we cannot push samples fast enough
+            # if set to nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION we will get an error if we are too slow, which might be good for critical applications
+            # if we set this to nidaqmx.constants.RegenerationMode.ALLOW_REGENERATION we will reuse sampels from before (default).
+            # The latter is better in most cases since that allows us to do some precessing in between separate measurements.
+            frame_time = self.framesize / self.fs
+            timeout = frame_time * 0.5
             zero_frame = np.zeros((self._output_task.out_stream.num_chans, self.framesize))
+            self._output_task.out_stream.output_buf_size = 5 * self.framesize  # If we dont set this manually it will default to the size of the first write, i.e. framesize. The value is per channel.
+            write_funciton(zero_frame)  # Pre-fill the buffer with zeros, there needs to be something in the buffer when we start
+            write_funciton(zero_frame)  # For the callcabk to be called properly, we need at least two frames in the buffer to start with, so that we have some time to push the next frame.
 
             def output_callback(task_handle, every_n_samples_event_type,
                                 number_of_samples, callback_data):
                 try:
-                    data = self._hardware_output_Q.get(timeout=timeout)
+                    data = self._hardware_output_Q.get(timeout=frame_time * 0.5)
                 except queue.Empty:
                     data = zero_frame
                     logger.frames('Hardware output Q empty')
                 else:
                     self._hardware_output_Q.task_done()
                 finally:
-                    sampsWritten = write_funciton(data)
+                    sampsWritten = write_funciton(data, timeout=frame_time*3)
                     self.__hardware_output_frames += 1
                 return 0
             self._output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
