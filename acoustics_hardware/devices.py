@@ -10,6 +10,8 @@ try:
     import nidaqmx
     import nidaqmx.stream_readers
     import nidaqmx.stream_writers
+    import warnings
+    warnings.filterwarnings('ignore', category=nidaqmx.errors.DaqWarning)
 except ImportError:
     pass
 
@@ -177,6 +179,10 @@ class NIDevice(core.Device):
         chassis = cls.get_chassis(chassis)
         devs = cls.get_devices()
         return [dev for dev in devs if chassis in dev and 'Mod' in dev]
+
+    @classmethod
+    def reset_chassis(cls, chassis):
+        nidaqmx.system.Device(chassis).reset_device()
 
     @classmethod
     def reset_chassis_modules(cls, chassis):
