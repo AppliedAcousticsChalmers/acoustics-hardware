@@ -380,8 +380,24 @@ class NIDevice(core.Device):
                 self.__hardware_input_frames += 1
                 return 0
             self._input_task.register_every_n_samples_acquired_into_buffer_event(self.framesize, input_callback)
-            self._input_task.start()
-            logger.debug('Hardware input initialized')
+
+            for start_tries in range(5):
+                self._input_task.start()
+                for wait_tries in range(5):
+                    if self.__hardware_input_frames > 0:
+                        logger.debug('Hardware input initialized')
+                        input_started = True
+                        break
+                    core.time.sleep(0.2)
+                else:
+                    logger.debug('Restarting input task!')
+                    input_started = False
+                    self._input_task.stop()
+                if input_started:
+                    break
+            else:
+                logger.warning('Hardware input potentially not initialized!')
+            
 
         if len(self.outputs):
             writer = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream)
@@ -405,8 +421,23 @@ class NIDevice(core.Device):
                     self.__hardware_output_frames += 1
                 return 0
             self._output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
-            self._output_task.start()
-            logger.debug('Hardware output initialized')
+
+            for start_tries in range(5):
+                self._output_task.start()
+                for wait_tries in range(5):
+                    if self.__hardware_output_frames > 0:
+                        logger.debug('Hardware output initialized')
+                        output_started = True
+                        break
+                    core.time.sleep(0.2)
+                else:
+                    logger.debug('Restarting output task!')
+                    output_started = False
+                    self._output_task.stop()
+                if output_started:
+                    break
+            else:
+                logger.warning('Hardware output potentially not initialized!')
 
         logger.verbose('Hardware running')
         self._sync_event.set()
