@@ -8,6 +8,7 @@ import scipy.signal
 from . import utils
 import json
 import logging
+import time
 from .generators import GeneratorStop
 from .distributors import QDistributor
 
@@ -69,13 +70,20 @@ class Device:
         self._sync_event = threading.Event()
         self._initialized_event = threading.Event()
 
-        self.__name = 'Device_{}'.format(Device.__device_count)
+        self.__id = Device.__device_count
         Device.__device_count += 1
 
         kwargs.setdefault('fs', 1)  # This is required for all devices
         kwargs.setdefault('framesize', 1)
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    @property
+    def label(self):
+        try:
+            return self.name + ' (Device_{})'.format(self.__id)
+        except AttributeError:
+            return 'Device_{}'.format(self.__id)  
 
     def initialize(self, blocking=True):
         """Initializes the device.
@@ -89,17 +97,13 @@ class Device:
             This does NOT activate inputs or outputs!
         """
         # self.__main_thread = multiprocessing.Process(target=self._Device__main_target)
-        try:
-            name = self.name + ' (' + self.__name + ')'
-        except AttributeError:
-            name = self.__name
-        self.__main_thread = threading.Thread(target=self._Device__main_target, name=name)
+        self.__main_thread = threading.Thread(target=self._Device__main_target, name=self.label)
 
         self.__main_thread.start()
         if blocking:
             self._initialized_event.wait()
 
-    def terminate(self):
+    def terminate(self, blocking=False):
         """Terminates the device.
 
         Use this to turn off or disconnect a device safely after a measurement.
@@ -107,7 +111,11 @@ class Device:
         normally not have to make multiple calls to this function.
 
         """
+        logger.debug('Terminate called')
         self.__main_stop_event.set()
+        if blocking:
+            logger.debug('Waiting for termination')
+            self.__main_thread.join()
         # self.__process.join(timeout=10)
 
     def start(self, timed=False, input=True, output=True, blocking=False):
@@ -365,7 +373,7 @@ class Device:
         # Start hardware in separate thread
         # Manage triggers in separate thread
         # Manage Qs in separate thread
-        name = self.__main_thread.name
+        name = self.label
         generator_thread = threading.Thread(target=self.__generator_target, name=name + ' - generator')
         output_trigger_thread = threading.Thread(target=self.__output_trigger_target, name=name + ' - outputtrigger')
         hardware_thread = threading.Thread(target=self._hardware_run, name=name + ' - hardware')
@@ -395,6 +403,7 @@ class Device:
         self._initialized_event.set()
         logger.verbose('Device initialized')
         self.__main_stop_event.wait()
+        logger.verbose('Device terminating')
         self._initialized_event.clear()
         self._hardware_stop_event.set()
         hardware_thread.join()
@@ -494,6 +503,7 @@ class Device:
         if self.__input_data_lock.locked():
             self.__input_data_lock.release()
         self.__triggered_q.put(False)  # Signal the q-handler thread to stop
+        logger.verbose('Triggers terminated')
 
     def __distributor_target(self):
         """Queue handling method.
@@ -529,6 +539,7 @@ class Device:
             if this_frame is False:
                 # Signal to stop, we have sent it to all distributors if they need it
                 break
+        logger.verbose('Distributors terminated')
 
     def __generator_target(self):
         """Generator handling method.
@@ -584,6 +595,7 @@ class Device:
                 break
         self._hardware_output_Q.put(False)
         self._hardware_output_Q.task_done()
+        logger.verbose('Generators terminated')
 
     def __output_trigger_target(self):
         for trig in self.__output_triggers:
@@ -601,6 +613,7 @@ class Device:
                 trig(frame)
             self._hardware_output_Q.slave_task_done()
             self.__output_triggered_frames += 1
+        logger.verbose('Output triggers terminated')
 
 
 class MasterSlaveQueue(queue.Queue):

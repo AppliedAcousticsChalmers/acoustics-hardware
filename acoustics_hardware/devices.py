@@ -317,6 +317,8 @@ class NIDevice(core.Device):
         self.reset_chassis_modules(self.chassis)
         self._input_task = nidaqmx.Task()
         self._output_task = nidaqmx.Task()
+        self.__hardware_input_frames = 0
+        self.__hardware_output_frames = 0
 
         for ch in self.inputs:
             module, channel = self.input_map(index=ch)
@@ -369,6 +371,7 @@ class NIDevice(core.Device):
                                number_of_samples, callback_data):
                 sampsRead = read_function(databuffer, self.framesize)
                 self._hardware_input_Q.put(databuffer.copy())
+                self.__hardware_input_frames += 1
                 return 0
             self._input_task.register_every_n_samples_acquired_into_buffer_event(self.framesize, input_callback)
             self._input_task.start()
@@ -380,7 +383,7 @@ class NIDevice(core.Device):
             self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION  # Needed to prevent issues with buffer overwrites and reuse
             write_funciton(np.zeros((self._output_task.out_stream.num_chans, 2*self.framesize)))  # Pre-fill the buffer with zeros, there needs to be something in the buffer when we start
             timeout = 0.5 * self.framesize / self.fs
-            zero_frame = np.zeros((output_task.out_stream.num_chans, self.framesize))
+            zero_frame = np.zeros((self._output_task.out_stream.num_chans, self.framesize))
 
             def output_callback(task_handle, every_n_samples_event_type,
                                 number_of_samples, callback_data):
@@ -393,22 +396,28 @@ class NIDevice(core.Device):
                     self._hardware_output_Q.task_done()
                 finally:
                     sampsWritten = write_funciton(data)
+                    self.__hardware_output_frames += 1
                 return 0
-            output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
-            output_task.start()
+            self._output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
+            self._output_task.start()
             logger.debug('Hardware output initialized')
 
         logger.verbose('Hardware running')
         self._sync_event.set()
         self._hardware_stop_event.wait()
 
-        input_task.stop()
-        output_task.stop()
-        input_task.wait_until_done(timeout=10)
-        output_task.wait_until_done(timeout=10)
-        input_task.close()
-        output_task.close()
+        logger.debug('Hardware terminating')
+        self._input_task.stop()
+        self._output_task.stop()
+        logger.debug('Hardware tasks stopped')
+        self._input_task.wait_until_done(timeout=10)
+        self._output_task.wait_until_done(timeout=10)
+        logger.debug('Hardware tasks done')
+        self._input_task.close()
+        self._output_task.close()
+        logger.debug('Hardware tasks closed')
         self.reset_chassis_modules(self.chassis)
+        logger.verbose('Hardware terminated')
 
 
 class FeedbackDevice(core.Device):
