@@ -265,7 +265,7 @@ class SweepGenerator(ArbitrarySignalGenerator):
         self.signal = signal
 
     @classmethod
-    def deconvolve(cls, reference, output, fs=None, f_low=None, f_high=None, T=None, fade_out=None, method='regularized', orders=0, **kwargs):
+    def deconvolve(cls, reference, output, fs=None, f_low=None, f_high=None, T=None, fade_out=None, method='regularized', orders=1, **kwargs):
         if method == 'filtering':
             inverse_filter = cls._filtered_inverse(reference, fs=fs, f_low=f_low, f_high=f_high, **kwargs)
         elif method == 'regularized':
@@ -284,20 +284,33 @@ class SweepGenerator(ArbitrarySignalGenerator):
         ir_whole = np.fft.irfft(TF, axis=-1)
         if orders == 'whole':
             return np.squeeze(ir_whole)
-        ir = ir_whole[..., inverse_filter.size:]
+    
+
+        ir = [ir_whole[..., inverse_filter.size:]]
+        if orders > 1:
+            phase_rate = inverse_filter.size / np.log(f_high / f_low)
+            for order in range(1, orders):
+                ir.append(ir_whole[..., inverse_filter.size - int(phase_rate * np.log(order + 1)):inverse_filter.size - int(phase_rate * np.log(order))])
 
         if T is not None:
             if fs is not None:
                 T = T * fs
-            ir = ir[..., :int(T)]
+            for order in range(orders):
+                ir[order] = ir[order][..., :int(T)]
         
         if fade_out is not None and fade_out>0:
             if fs is not None:
                 fade_out_samples = min(int(fade_out * fs), ir.shape[-1])
             fade_out = np.sin(np.linspace(np.pi/2, 0, fade_out_samples))**2
-            ir[..., -fade_out_samples:] *= fade_out
+            for order in range(orders):
+                ir[order][..., -fade_out_samples:] *= fade_out
 
-        return np.squeeze(ir)
+        for order in range(orders):
+            ir[order] = np.squeeze(ir[order])
+
+        if len(ir) == 1:
+            ir = ir[0]
+        return ir
 
     @classmethod
     def _filtered_inverse(cls, reference, fs=None, f_low=None, f_high=None, **kwargs):
