@@ -308,7 +308,11 @@ class Device:
 
         """
         self.__main_stop_event.clear()
-        self._hardware_stop_event.clear()
+        try:
+            self._hardware_stop_event.clear()
+        except AttributeError:
+            # If we reset a device which is not initialized, the hardware stop event does not exist.
+            pass
         if triggers:
             for trigger in self.__triggers:
                 trigger.reset()
