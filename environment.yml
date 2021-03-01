@@ -1,10 +1,9 @@
 name: acoustics_hardware_dev
 dependencies:
-  - numpy
-  - scipy
-  - matplotlib
-  - snakeviz
   - jupyter
+  - numpy
   - pip
+  - snakeviz
   - pip:
     - -e .
+    - nbstripout # for clean versioning of Jupyter notebooks
