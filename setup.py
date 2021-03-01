@@ -1,7 +1,7 @@
 from setuptools import setup
 
 __version__ = 'unknown'
-for line in open('acoustics_hardware/__init__.py'):
+for line in open('acoustics_hardware/__init__.py', mode='r', encoding='utf-8'):
     if line.startswith('__version__'):
         exec(line)
         break
@@ -10,7 +10,7 @@ for line in open('acoustics_hardware/__init__.py'):
 setup(name='acoustics-hardware',
       version=__version__,
       description='Controlling hardware used in acoustic measurement systems',
-      long_description=open('README.rst').read(),
+      long_description=open('README.rst', mode='r', encoding='utf-8').read(),
       long_description_content_type='text/x-rst',
       url='https://github.com/AppliedAcousticsChalmers/acoustics-hardware',
       author='Carl Andersson',
@@ -18,11 +18,13 @@ setup(name='acoustics-hardware',
       license='MIT',
       packages=['acoustics_hardware'],
       install_requires=[
-          'numpy',
-          'scipy',
           'h5py',
-          'sounddevice',
+          'matplotlib',
           'nidaqmx;platform_system=="Windows"',
+          'numpy',
           'pyserial',
-          'SchunkMotionProtocol'],
+          'SchunkMotionProtocol',
+          'scipy',
+          'sounddevice',
+      ],
       )
