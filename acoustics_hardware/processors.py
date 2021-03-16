@@ -16,10 +16,10 @@ class Processor:
         return self.process(frame)
 
     def process(self, frame):
-        """Processes a single fraame of input.
+        """Processes a single frame of input.
 
-        The input frame might be the rame object as the read frame, so a
-        processor should not manitulate the data in place.
+        The input frame might be the same object as the read frame, so a
+        processor should not manipulate the data in place.
 
         Arguments:
             frame (`numpy.ndarray`): ``(n_ch, n_samp)`` shape input frame.
@@ -83,31 +83,84 @@ class LevelDetector(Processor):
         return self._buffer[0]**0.5
 
 
-def deconvolve(input, output, fs=None, f_low=None, f_high=None, T=None, filter_args=None):
-    output = np.atleast_2d(output)
-    input = np.pad(input, (0, output.shape[1] - input.shape[0]), mode='constant')
-    TF = np.fft.rfft(output, axis=1) / np.fft.rfft(input)
+def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
+               filter_args=None):
+    """Deconvolve signals.
 
+    Perform signal deconvolution of output spectrum over input spectrum.
+
+    Arguments:
+        exc_sig (`numpy.ndarray`): ``(n_ch, n_samp)`` shape excitation output
+            signal.
+        rec_sig (`numpy.ndarray`): ``(n_ch, n_samp)`` shape recorded input
+            signal.
+        fs (`float`): sampling frequency in Hertz, default ``None``
+        f_low (`float`): lower bandpass cutoff frequency in Hertz
+            (or in normalized frequency in case no sampling frequency is given),
+            default ``None`` resembling no filter.
+        f_high (`float`): upper bandpass cutoff frequency in Hertz
+            (or in normalized frequency in case no sampling frequency is given),
+            default ``None`` resembling no filter.
+        res_len (`float`): target length of deconvolution results in seconds
+            (or in samples in case no sampling frequency is given),
+            default ``None`` resembling no truncation.
+        filter_args: arguments will be passed to `scipy.signal.iirfilter`.
+
+    Returns:
+        `numpy.ndarray`: ``(n_ch, n_samp)`` shape deconvolved signal.
+    """
+    rec_sig = np.atleast_2d(rec_sig)
     filter_args = filter_args or {}
     filter_args.setdefault('N', 8)
+    if fs is not None:
+        filter_args.setdefault('fs', fs)
     if f_low is not None and f_high is not None:
-        if fs is not None:
-            f_low = f_low / fs * 2
-            f_high = f_high / fs * 2
         filter_args.setdefault('Wn', (f_low, f_high))
     filter_args.setdefault('ftype', 'butter')
     filter_args['btype'] = 'bandpass'
     filter_args['output'] = 'sos'
+
+    # Zero pad excitation signal to size of recorded signal
+    exc_sig = np.pad(exc_sig, pad_width=(0, rec_sig.shape[-1] - exc_sig.shape[-1]))
+
+    # Deconvolve signals
+    res_tf = np.fft.rfft(rec_sig, axis=-1) / np.fft.rfft(exc_sig, axis=-1)
+
+    # Apply bandpass filter
     if 'Wn' in filter_args:
         sos = scipy.signal.iirfilter(**filter_args)
-        _, H = scipy.signal.sosfreqz(sos, TF.shape[1])
-        TF = TF * H
-    ir = np.fft.irfft(TF, axis=1)
-    if T is not None:
+        _, filter_tf = scipy.signal.sosfreqz(sos, worN=res_tf.shape[-1], whole=False)
+        res_tf *= filter_tf
+
+        # # Plot effect of bandpass filter in frequency domain
+        # import matplotlib.pyplot as plt
+        # f = np.fft.rfftfreq(rec_sig.shape[-1], d=1. / fs)
+        # tf_raw = 20 * np.log10(np.abs(np.squeeze(res_tf / filter_tf)[0]))
+        # tf_fil = 20 * np.log10(np.abs(np.squeeze(res_tf[0])))
+        # plt.semilogx(f, tf_raw.T, 'k', label='raw')
+        # plt.semilogx(f, tf_fil.T, 'r', label='filtered')
+        # plt.title('Provided signals')
+        # plt.xlabel('Frequency' + ('in Hz' if fs is not None else ''))
+        # plt.ylabel('Magnitude in dB')
+        # plt.legend(loc='best')
+        # plt.grid(which='both', axis='both')
+        # if fs is not None:
+        #     plt.xlim([20, fs / 2])
+        # plt.ylim([-120, 0]
+        #          + np.ceil((np.nanmax(np.hstack((tf_raw, tf_fil))) / 5) + 1) * 5)
+        # plt.tight_layout()
+        # plt.show()
+
+    # Transform into time domain
+    res_ir = np.fft.irfft(res_tf, axis=-1)
+
+    # Truncate impulse response
+    if res_len is not None and res_len != 0:
         if fs is not None:
-            T = T * fs
-        ir = ir[:, :int(T)]
-    return np.squeeze(ir)
+            res_len *= fs
+        res_ir = res_ir[..., :int(res_len)]
+
+    return res_ir
 
 
 def mls_analysis(reference, output):
@@ -124,7 +177,7 @@ def mls_analysis(reference, output):
     ps = np.zeros(seq_len, dtype=np.int64)
     for idx in range(seq_len):
         for s in range(order):
-            ps[idx] += reference[(idx-s)%seq_len] << (order-1-s)
+            ps[idx] += reference[(idx-s) % seq_len] << (order-1-s)
     
     indices = np.argsort(ps)[2**np.arange(order-1, -1, -1)-1]
     pl = np.zeros(seq_len, dtype=np.int64)
