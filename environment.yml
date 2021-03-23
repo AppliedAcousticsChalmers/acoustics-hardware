@@ -6,4 +6,4 @@ dependencies:
   - snakeviz
   - pip:
     - -e .
-    - nbstripout # for clean versioning of Jupyter notebooks
+    - ipympl # for interactive plots in jupyter with matplotlib
