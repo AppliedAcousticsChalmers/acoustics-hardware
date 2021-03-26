@@ -1,5 +1,7 @@
 import numpy as np
-import scipy.signal
+from scipy import signal as sps
+
+from . import utils
 
 
 class Processor:
@@ -63,7 +65,7 @@ class LevelDetector(Processor):
     def process(self, frame):
         # Squared input level is tracked in order for the RMS trigger to work properly.
         input_levels = frame[self.channel]**2
-        output_levels, self._buffer = scipy.signal.lfilter([self._digital_constant], [1, self._digital_constant - 1], input_levels, zi=self._buffer)
+        output_levels, self._buffer = sps.lfilter([self._digital_constant], [1, self._digital_constant - 1], input_levels, zi=self._buffer)
         return output_levels**0.5
 
     def reset(self):
@@ -227,8 +229,8 @@ def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
 
     # Apply bandpass filter
     if 'Wn' in filter_args:
-        filter_sos = scipy.signal.iirfilter(**filter_args)
-        _, filter_tf = scipy.signal.sosfreqz(
+        filter_sos = sps.iirfilter(**filter_args)
+        _, filter_tf = sps.sosfreqz(
                 sos=filter_sos,
                 worN=res_tf.shape[-1],
                 whole=False,
@@ -283,15 +285,12 @@ def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
     #     plt.tight_layout()
     #     plt.show()
 
-    # Apply start window
-    if win_in_len:
-        win = scipy.signal.windows.cosine(M=win_in_len * 2, sym=True) ** 2
-        res_ir[..., :win_in_len] *= win[:win_in_len]
-
-    # Apply end window
-    if win_out_len:
-        win = scipy.signal.windows.cosine(M=win_out_len * 2, sym=True) ** 2
-        res_ir[..., -win_out_len:] *= win[win_out_len:]
+    # Apply start and end window
+    res_ir = utils.fade_signal(
+            sig=res_ir,
+            win_in_len=win_in_len,
+            win_out_len=win_out_len,
+    )
 
     # # Plot effect of result signals windowing in time domain
     # import matplotlib.pyplot as plt
