@@ -100,12 +100,12 @@ def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
         rec_sig (`numpy.ndarray`): ``(..., n_ch, n_samp)`` shape recorded
             input signals.
         fs (`float`, optional): sampling frequency in Hertz, default ``None``
-        f_low (`float`, optional): lower bandpass cutoff frequency in Hertz
-            (or in normalized frequency in case no sampling frequency is given),
-            default ``None``.
-        f_high (`float`, optional): upper bandpass cutoff frequency in Hertz
-            (or in normalized frequency in case no sampling frequency is given),
-            default ``None``.
+        f_low (`float`, optional): lower bandpass (or highpass) cutoff
+            frequency in Hertz (or in normalized frequency in case no
+            sampling frequency is given), default ``None``.
+        f_high (`float`, optional): upper bandpass (or lowpass cutoff
+            frequency in Hertz (or in normalized frequency in case no
+            sampling frequency is given), default ``None``.
         res_len (`float`, optional): target length of deconvolution results
             in seconds (or in samples in case no sampling frequency is given),
             default ``None`` resembling no truncation.
@@ -138,8 +138,14 @@ def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
         filter_args.setdefault('fs', fs)
     if f_low not in (None, False) and f_high:
         filter_args.setdefault('Wn', (f_low, f_high))
+        filter_args['btype'] = 'bandpass'
+    elif f_low not in (None, False):
+        filter_args.setdefault('Wn', f_low)
+        filter_args['btype'] = 'highpass'
+    elif f_high not in (None, False):
+        filter_args.setdefault('Wn', f_high)
+        filter_args['btype'] = 'lowpass'
     filter_args.setdefault('ftype', 'butter')
-    filter_args['btype'] = 'bandpass'
     filter_args['output'] = 'sos'
 
     # # Plot provided signals in time domain
