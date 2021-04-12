@@ -87,8 +87,8 @@ class LevelDetector(Processor):
 
 # noinspection DuplicatedCode
 def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
-               filter_args=None, deconv_type='lin', inv_dyn_db=None,
-               win_in_len=None, win_out_len=None):
+               filter_args=None, deconv_type='lin', deconv_phase=True,
+               inv_dyn_db=None, win_in_len=None, win_out_len=None):
     """Deconvolve signals.
 
     Perform signal deconvolution of recording input spectra over excitation
@@ -112,8 +112,11 @@ def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
         filter_args (optional): arguments will be passed to
             `scipy.signal.iirfilter`.
         deconv_type (``'lin'`` or ``'cyc'``, optional): linear deconvolution to
-             to cut non-harmonic distortion products from the resulting
-             signals or cyclic deconvolution otherwise, default ``'lin'``.
+             cut non-harmonic distortion products from the resulting signals
+             or cyclic deconvolution otherwise, default ``'lin'``.
+        deconv_phase (`bool`, optional): if the phase of the excitation signals
+            should be considered (complex deconvolution) or neglected otherwise
+            (compensation of the magnitude spectrum), default ``True``.
         inv_dyn_db (`float`, optional): inversion dynamic limitation applied to
             excitation signal in Decibel, default ``None``.
         win_in_len (`int`, optional): length of fade-in window applied to
@@ -195,6 +198,10 @@ def deconvolve(exc_sig, rec_sig, fs=None, f_low=None, f_high=None, res_len=None,
     #          + np.ceil((np.nanmax(np.hstack((tf_exc, tf_rec))) / 5) + 1) * 5)
     # plt.tight_layout()
     # plt.show()
+
+    # Apply zero phase
+    if not deconv_phase:
+        exc_fd_inv = np.abs(exc_fd_inv)
 
     # Apply inversion dynamic limitation
     if inv_dyn_db not in (None, False):
