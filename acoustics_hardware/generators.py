@@ -413,6 +413,35 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
         self.sequence, state = scipy.signal.max_len_seq(self.order)
         self.signal = (1 - 2 * self.sequence).astype('float64')
 
+    def analyze(self, data):
+	    data = np.atleast_2d(data)
+	    seq_len = 2**self.order - 1
+	    # order = np.round(np.log2(seq_len+1)).astype(int)
+	    reps = int(data.shape[1] / seq_len)
+	    
+	    if reps > 1:
+	        response = data[:, seq_len:reps * seq_len].reshape((-1, reps-1, seq_len)).mean(axis=1)
+	    else:
+	        response = data[:, :seq_len]
+	    
+	    ps = np.zeros(seq_len, dtype=np.int64)
+	    for idx in range(seq_len):
+	        for s in range(self.order):
+	            ps[idx] += self.sequence[(idx-s)%seq_len] << (self.order-1-s)
+	    
+	    indices = np.argsort(ps)[2**np.arange(self.order-1, -1, -1)-1]
+	    pl = np.zeros(seq_len, dtype=np.int64)
+	    for idx in range(seq_len):
+	        for s in range(self.order):
+	            pl[idx] += self.sequence[(indices[s]-idx)%seq_len] << (self.order-s-1)
+	            
+	    transform = np.zeros((data.shape[0], seq_len+1))
+	    transform[:, ps] = response
+	    for _ in range(self.order):
+	        transform = np.concatenate((transform[:, ::2] + transform[:, 1::2], transform[:,::2] - transform[:, 1::2]), axis=1)
+	    ir = transform[:, pl] / (seq_len+1)
+	    return np.squeeze(ir)
+
 
 class FunctionGenerator(Generator):
     """Generates signals from a shape function.
