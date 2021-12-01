@@ -210,6 +210,10 @@ class ArbitrarySignalGenerator(Generator):
         """
         super().setup()
 
+    @property
+    def duration(self):
+    	return len(self.signal) / self.device.fs * self.repetitions
+
 
 class SweepGenerator(ArbitrarySignalGenerator):
     """Swept sine generator.
@@ -226,12 +230,12 @@ class SweepGenerator(ArbitrarySignalGenerator):
     See Also:
         `ArbitrarySignalGenerator`, `scipy.signal.chirp`
     """
-    def __init__(self, start_frequency, stop_frequency, duration,
+    def __init__(self, start_frequency, stop_frequency, sweep_length,
                  method='logarithmic', bidirectional=False, **kwargs):
         super().__init__(**kwargs)
         self.start_frequency = start_frequency
         self.stop_frequency = stop_frequency
-        self.duration = duration
+        self.sweep_length = sweep_length
         self.method = method
         self.bidirectional = bidirectional
 
@@ -252,8 +256,8 @@ class SweepGenerator(ArbitrarySignalGenerator):
 
     def setup(self):
         super().setup()
-        time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
-        phase_rate = self.duration / np.log(self.stop_frequency / self.start_frequency)
+        time_vector = np.arange(round(self.sweep_length * self.device.fs)) / self.device.fs
+        phase_rate = self.sweep_length / np.log(self.stop_frequency / self.start_frequency)
         phase = 2 * np.pi * self.start_frequency * phase_rate * np.exp(time_vector / phase_rate)
         signal = np.sin(phase)
         if self.bidirectional:
