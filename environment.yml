@@ -1,10 +1,12 @@
-name: acoustics_hardware_dev
+name: acoustics-hardware-dev
 dependencies:
   - numpy
   - scipy
-  - matplotlib
-  - snakeviz
   - jupyter
+  - sphinx
+  - flake8
+  - pydocstyle
   - pip
   - pip:
+    - sphinx_rtd_theme
     - -e .
