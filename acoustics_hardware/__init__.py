@@ -1,14 +1,9 @@
 import logging
-
-__version__ = '0.1.0'
 logger = logging.getLogger(__name__)
 
-__all__ = ['core',
-           'devices',
-           'triggers',
-           'generators',
-           'processors',
-           'distributors',
-           ]
+from . import _version  # noqa: E402
+__version_info__ = _version.version_info
+__version__ = _version.version
+del _version
 
-from . import *
+from . import core, devices, triggers, generators, processors, distributors  # noqa: E402, F401
