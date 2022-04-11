@@ -174,3 +174,33 @@ def _exponential_sweep_time_reversal_inverse(
     amplitude_correction = 10**(np.linspace(0, -6 * np.log2(upper_cutoff / lower_cutoff), reference_signal.size) / 20)
     inverse_signal = reference_signal[-1::-1] * amplitude_correction
     return inverse_signal
+
+
+def mls_analysis(reference, output):
+    output = np.atleast_2d(output)
+    seq_len = len(reference)
+    order = np.round(np.log2(seq_len + 1)).astype(int)
+    reps = int(output.shape[1] / seq_len)
+
+    if reps > 1:
+        response = output[:, seq_len:reps * seq_len].reshape((-1, reps - 1, seq_len)).mean(axis=1)
+    else:
+        response = output[:, :seq_len]
+
+    ps = np.zeros(seq_len, dtype=np.int64)
+    for idx in range(seq_len):
+        for s in range(order):
+            ps[idx] += reference[(idx - s) % seq_len] << (order - 1 - s)
+
+    indices = np.argsort(ps)[2**np.arange(order - 1, -1, -1) - 1]
+    pl = np.zeros(seq_len, dtype=np.int64)
+    for idx in range(seq_len):
+        for s in range(order):
+            pl[idx] += reference[(indices[s] - idx) % seq_len] << (order - s - 1)
+
+    transform = np.zeros((output.shape[0], seq_len + 1))
+    transform[:, ps] = response
+    for _ in range(order):
+        transform = np.concatenate((transform[:, ::2] + transform[:, 1::2], transform[:, ::2] - transform[:, 1::2]), axis=1)
+    ir = transform[:, pl] / (seq_len + 1)
+    return np.squeeze(ir)
