@@ -1,29 +1,48 @@
 import numpy as np
 
 
-def truncate_signals(*signals, length=None, samplerate=None):
+def _apply_to_signals(func, signals):
+    if isinstance(signals, np.ndarray):
+        return func(signals)
+    return tuple(func(signal) for signal in signals)
+
+
+def truncate_signals(signals, length=None, samplerate=None):
+    """Cut signals down to a specified length."""
     if length is None:
         return signals
     if samplerate is not None:
         length = round(samplerate * length)
-    return [signal[..., :length] for signal in signals]
+
+    def truncation(signal):
+        return signal[..., :length]
+
+    return _apply_to_signals(truncation, signals)
 
 
-def pad_signals(*signals, length=None, samplerate=None):
+def extend_signals(signals, length=None, samplerate=None):
+    """Zero-pad signals to a certain length.
+
+    Note that this will not shorten signals, so if they are longer
+    than the requested length they will be unchanged.
+    """
     if length is None:
         return signals
     if samplerate is not None:
         length = round(samplerate * length)
-    padded_signals = []
-    for signal in signals:
+
+    def extend(signal):
         padding = length - signal.shape[-1]
+        if padding < 1:
+            return signal.copy()
         padding = np.zeros(signal.shape[:-1] + (padding,))
         padded = np.concatenate([signal, padding], axis=-1)
-        padded_signals.append(padded)
-    return padded_signals
+        return padded
+
+    return _apply_to_signals(extend, signals)
 
 
-def fade_signals(*signals, fade_in=None, fade_out=None, samplerate=None, inplace=True):
+def fade_signals(signals, fade_in=None, fade_out=None, samplerate=None, inplace=True):
     if fade_in is None and fade_out is None:
         return signals
 
@@ -42,7 +61,7 @@ def fade_signals(*signals, fade_in=None, fade_out=None, samplerate=None, inplace
     else:
         fade_out = np.sin(np.linspace(np.pi / 2, 0, fade_out))**2
 
-    def apply_fades(signal):
+    def fade(signal):
         # Apply the fade in and the fade out
         # Make sure to respect the `inplace` variable!
         if not inplace:
@@ -51,4 +70,4 @@ def fade_signals(*signals, fade_in=None, fade_out=None, samplerate=None, inplace
         signal[..., -fade_out.size:] *= fade_out
         return signal
 
-    return [apply_fades(signal) for signal in signals]
+    return _apply_to_signals(fade, signals)

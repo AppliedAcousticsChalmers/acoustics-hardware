@@ -10,7 +10,7 @@ def sweep_deconvolution(
     lower_cutoff=None,
     upper_cutoff=None,
     truncation_length=None,
-    padding_length=None,
+    output_length=None,
     fade_in=None,
     fade_out=None,
     ir_orders=1,
@@ -78,10 +78,12 @@ def sweep_deconvolution(
         for order in range(1, ir_orders):  # Starts with order 1, corresponding to the first harmonic.
             irs.append(impulse_response[indices[order]:indices[order - 1]])
 
-    irs = signal_tools.truncate_signals(*irs, length=truncation_length, samplerate=samplerate)
-    irs = signal_tools.pad_signals(*irs, length=padding_length, samplerate=samplerate)
-    irs = signal_tools.fade_signals(*irs, fade_in=fade_in, fade_out=fade_out, samplerate=samplerate)
+    irs = signal_tools.truncate_signals(irs, length=truncation_length, samplerate=samplerate)
+    irs = signal_tools.extend_signals(irs, length=output_length, samplerate=samplerate)
+    irs = signal_tools.fade_signals(irs, fade_in=fade_in, fade_out=fade_out, samplerate=samplerate)
 
+    if len(irs) == 1:
+        return irs[0]
     return irs
 
 
