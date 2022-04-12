@@ -2,8 +2,12 @@ class Node:
     """Generic pipeline Node."""
 
     def __init__(self, input_node=None, output_node=None):
-        self._input = input_node
-        self._output = output_node
+        self.__input = None
+        self.__output = None
+        if input_node is not None:
+            self.insert_input(input_node)
+        if output_node is not None:
+            self.insert_output(output_node)
 
     def setup(self, pipeline=False):
         """Run setup for this Node.
