@@ -144,3 +144,30 @@ class AudioInterface(_StreamedInterface):
     @property
     def max_outputs(self):
         return self._output_device['max_output_channels']
+
+
+class DummyInterface(_StreamedInterface):
+    def __init__(self, framesize=None, **kwargs):
+        super().__init__(**kwargs)
+        self.framesize = framesize
+
+    def run(self):
+        import threading
+        self._running = threading.Event()
+        self._thread = threading.Thread(target=self._passthrough_target)
+        self._thread.start()
+
+    def _passthrough_target(self):
+        self._running.set()
+        frames = 0
+        while self._running.is_set() and frames < 200:
+            frames += 1
+            try:
+                frame = self._input.output(self.framesize)
+            except _core.PipelineStop:
+                self._running.clear()
+                break
+            self._output.input(frame)
+
+    def stop(self):
+        self._running.clear()
