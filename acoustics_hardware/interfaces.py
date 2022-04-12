@@ -5,19 +5,17 @@ import sounddevice as sd
 class _StreamedInterface(_core.SamplerateDecider):
     def __init__(self, input_channels=None, output_channels=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.samplerate = samplerate
-        self.framesize = framesize
 
         input_channels = input_channels or []
         output_channels = output_channels or []
         try:
             self.input_channels = list(input_channels)
         except TypeError:
-            self.input_channels = [input_channels]
+            self.input_channels = list(range(input_channels))
         try:
             self.output_channels = list(output_channels)
         except TypeError:
-            self.output_channels = [output_channels]
+            self.output_channels = list(range(output_channels))
 
 
 class AudioInterface(_StreamedInterface):
@@ -53,6 +51,10 @@ class AudioInterface(_StreamedInterface):
         inputs = self.input_channels
         num_input_ch = max(inputs, default=-1) + 1
         num_output_ch = max(outputs, default=-1) + 1
+        if num_output_ch == 1 and self.max_outputs > 1:
+            # PortAudio by default duplicates mono channels over all channels.
+            # This is not what the rest of this package is doing.
+            num_output_ch = 2
         silent_ch = [ch for ch in range(num_output_ch) if ch not in outputs]
 
         def process_input(frame):
@@ -65,6 +67,7 @@ class AudioInterface(_StreamedInterface):
                 buffer[:, outputs] = self._input.output(buffer.shape[0]).T
                 buffer[:, silent_ch] = 0
             except _core.PipelineStop:
+                buffer[:] = 0
                 raise sd.CallbackStop()
 
         if num_input_ch and num_output_ch:
