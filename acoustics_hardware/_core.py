@@ -1,3 +1,7 @@
+class PipelineStop(Exception):
+    """Raised internally when it is time to stop the pipeline."""
+
+
 class Node:
     """Generic pipeline Node."""
 
