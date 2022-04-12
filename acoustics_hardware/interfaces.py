@@ -2,8 +2,8 @@ from . import _core
 import sounddevice as sd
 
 
-class _StreamedInterface(_core.Node):
-    def __init__(self, input_channels=None, output_channels=None, samplerate=None, framesize=None, *args, **kwargs):
+class _StreamedInterface(_core.SamplerateDecider):
+    def __init__(self, input_channels=None, output_channels=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.samplerate = samplerate
         self.framesize = framesize
@@ -34,8 +34,9 @@ class AudioInterface(_StreamedInterface):
         """
         return sd.query_devices()
 
-    def __init__(self, name=None, input_name=None, output_name=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, name=None, input_name=None, output_name=None, framesize=None, **kwargs):
+        super().__init__(**kwargs)
+        self.framesize = framesize
         input_name = input_name or name
         output_name = output_name or name
         input_name = sd.default.device[0] if input_name is None else input_name
