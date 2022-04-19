@@ -163,9 +163,19 @@ class SamplerateFollower(Node):
     def samplerate(self):
         direction = self._get_samplerate_direction()
         if direction == 'upstream':
-            return self._input.samplerate
+            samplerate = self._input.samplerate
+            try:
+                _, samplerate = samplerate
+            except TypeError:
+                pass
+            return samplerate
         if direction == 'downstream':
-            return self._output.samplerate
+            samplerate = self._output.samplerate
+            try:
+                samplerate, _ = samplerate
+            except TypeError:
+                pass
+            return samplerate
 
     def _get_samplerate_direction(self, direction='both'):
         """Check if the samplerate can be found along the pipeline.
