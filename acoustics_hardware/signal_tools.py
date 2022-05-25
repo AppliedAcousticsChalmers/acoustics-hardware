@@ -42,6 +42,26 @@ def extend_signals(signals, length=None, samplerate=None):
     return _apply_to_signals(extend, signals)
 
 
+def pad_signals(signals, pre_pad=None, post_pad=None, samplerate=None):
+    if pre_pad is None and post_pad is None:
+        return signals
+
+    if samplerate is not None:
+        if pre_pad is not None:
+            pre_pad = round(samplerate * pre_pad)
+        if post_pad is not None:
+            post_pad = round(samplerate * post_pad)
+    pre_pad = pre_pad or 0
+    post_pad = post_pad or 0
+    pre_pad = np.zeros(signals.shape[:-1] + (pre_pad,))
+    post_pad = np.zeros(signals.shape[:-1] + (post_pad,))
+
+    def pad(signal):
+        return np.concatenate([pre_pad, signal, post_pad], axis=-1)
+
+    return _apply_to_signals(pad, signals)
+
+
 def fade_signals(signals, fade_in=None, fade_out=None, samplerate=None, inplace=True):
     if fade_in is None and fade_out is None:
         return signals
