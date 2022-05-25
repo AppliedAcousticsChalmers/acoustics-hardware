@@ -8,9 +8,20 @@ class _Generator(_core.SamplerateFollower):
 
 
 class SignalGenerator(_Generator):
-    def __init__(self, signal, repetitions=1, **kwargs):
+    def __init__(
+        self, signal=None, repetitions=1,
+        fade_in=None, fade_out=None,
+        pre_pad=None, post_pad=None,
+        **kwargs
+    ):
         super().__init__(**kwargs)
-        self.signal = signal
+        self.fade_in = fade_in
+        self.fade_out = fade_out
+        self.pre_pad = pre_pad
+        self.post_pad = post_pad
+
+        if signal is not None:
+            self.signal = signal
 
         if repetitions == -1 or (isinstance(repetitions, str) and repetitions.lower()[:3] == 'inf'):
             repetitions = np.inf
@@ -21,6 +32,16 @@ class SignalGenerator(_Generator):
         super().reset(**kwargs)
         self._repetitions_done = 0
         self._sample_index = 0
+
+    @property
+    def signal(self):
+        return self._signal
+
+    @signal.setter
+    def signal(self, signal):
+        signal = signal_tools.fade_signals(signal, fade_in=self.fade_in, fade_out=self.fade_out, samplerate=self.samplerate, inplace=False)
+        signal = signal_tools.pad_signals(signal, pre_pad=self.pre_pad, post_pad=self.post_pad, samplerate=self.samplerate)
+        self._signal = signal
 
     def process(self, framesize):
         if self._repetitions_done >= self.repetitions:
@@ -42,6 +63,8 @@ class SignalGenerator(_Generator):
                 second_part = self.signal[..., :self._sample_index]
                 frame = np.concatenate([first_part, second_part], axis=-1)
             else:
+                if first_part.size == 0:
+                    raise _core.PipelineStop()
                 frame = signal_tools.extend_signals(first_part, length=framesize)
         return super().process(frame)
 
