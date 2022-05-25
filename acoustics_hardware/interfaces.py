@@ -1,21 +1,106 @@
 from . import _core
+import numpy as np
 import sounddevice as sd
+import time
+import functools
+
+
+def _channel_collection(channel_class, **default_channel_kwargs):
+    @functools.wraps(channel_class, updated=())
+    class ChannelCollection:
+        default_channel_settings = default_channel_kwargs
+        def __init__(self, channels=None):
+            self.channels = []
+            if channels is None:
+                return
+
+            if isinstance(channels, int):
+                # Channels given as number of channels to use
+                channels = range(channels)
+            if isinstance(channels, dict):
+                # Channels given as a single dict defining one channel
+                channels = [channels]
+
+            try:
+                # Channels given as a single pair of (int, dict) for a single channel
+                ch, configs = channels
+            except (ValueError, TypeError):
+                pass
+            else:
+                if isinstance(ch, int) and isinstance(configs, dict):
+                    # This extra check is needed in case channels is given as e.g. [0, 1]
+                    # which defines two channels, not one.
+                    channels = [channels]
+
+            for channel in channels:
+                try:
+                    # This channel is a single dict defining the channel
+                    self.append(**channel)
+                except TypeError:
+                    pass
+                else:
+                    continue
+
+                try:
+                    # Channel is an (int, dict) pair
+                    ch, configs = channel
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    if isinstance(ch, int) and isinstance(configs, dict):
+                        self.append(channel=ch, **configs)
+                        continue
+
+                if isinstance(channel, int):
+                    # This channel i s just defined by its index, with no settings
+                    self.append(channel)
+                    continue
+                raise ValueError(f'Cannot add channel with definition {channel}')
+
+
+        def append(self, channel, **kwargs):
+            self.channels.append(channel_class(channel, **self.default_channel_settings | kwargs))
+
+        def __getitem__(self, key):
+            return self.channels[key]
+
+        def __len__(self):
+            return len(self.channels)
+
+        def __repr__(self):
+            return repr(self.channels)
+
+    return ChannelCollection
+
+
+class SimpleChannel:
+    """A single channel without settings.
+
+    Parameters
+    -----------
+    channel : int
+        The index of the channel, zero based.
+    label : string, default none
+        An optional label to assign to the channel.
+    """
+
+    def __init__(self, channel, label=None):
+        self.channel = channel
+        self.label = label
+
+    def __repr__(self):
+        label = '' if self.label is None else f", '{self.label}'"
+        return f'{self.__class__.__name__}({self.channel}{label})'
 
 
 class _StreamedInterface(_core.SamplerateDecider):
+    _input_channels = _channel_collection(SimpleChannel)
+    _output_channels = _channel_collection(SimpleChannel)
+
     def __init__(self, input_channels=None, output_channels=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        input_channels = input_channels or []
-        output_channels = output_channels or []
-        try:
-            self.input_channels = list(input_channels)
-        except TypeError:
-            self.input_channels = list(range(input_channels))
-        try:
-            self.output_channels = list(output_channels)
-        except TypeError:
-            self.output_channels = list(range(output_channels))
+        self.input_channels = self._input_channels(input_channels)
+        self.output_channels = self._output_channels(output_channels)
 
 
 class AudioInterface(_StreamedInterface):
@@ -28,7 +113,7 @@ class AudioInterface(_StreamedInterface):
         Returns
         -------
         interfaces : list
-            A list of all devices.
+            A list of all interfaces found.
         """
         return sd.query_devices()
 
@@ -47,8 +132,8 @@ class AudioInterface(_StreamedInterface):
         self._output_device['index'] = device_list.index(self._output_device)
 
     def run(self):
-        outputs = self.output_channels
-        inputs = self.input_channels
+        outputs = [ch.channel for ch in self.output_channels]
+        inputs = [ch.channel for ch in self.input_channels]
         num_input_ch = max(inputs, default=-1) + 1
         num_output_ch = max(outputs, default=-1) + 1
         if num_output_ch == 1 and self.max_outputs > 1:
@@ -108,8 +193,8 @@ class AudioInterface(_StreamedInterface):
         self._stream.stop()
 
     def process(self, frame=None, framesize=None):
-        outputs = [ch + 1 for ch in self.output_channels]
-        inputs = [ch + 1 for ch in self.input_channels]
+        outputs = [ch.channel + 1 for ch in self.output_channels]
+        inputs = [ch.channel + 1 for ch in self.input_channels]
 
         if len(inputs) and len(outputs):
             return sd.playrec(
@@ -146,6 +231,22 @@ class AudioInterface(_StreamedInterface):
         return self._output_device['max_output_channels']
 
 
+            self._input_task.register_every_n_samples_acquired_into_buffer_event(framesize_downstream, self._read_callback)
+
+        if len(self.output_channels):
+            self._output_task.timing.cfg_samp_clk_timing(
+                rate=samplerate_upstream,
+                samps_per_chan=self.buffer_n_frames * framesize_upstream,
+                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS
+            )
+
+            self._write = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream).write_many_sample
+            self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION
+            # self._write(np.zeros((self._output_task.out_stream.num_chans, framesize_upstream)))
+            self._write_countdown = None
+            self._samples_written = 0
+            self._output_frames = []
+            self._write_callback(None, None, self.buffer_n_frames * framesize_downstream, None)
 class DummyInterface(_StreamedInterface):
     def __init__(self, framesize=None, **kwargs):
         super().__init__(**kwargs)
