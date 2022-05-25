@@ -4,6 +4,13 @@ import sounddevice as sd
 import time
 import functools
 
+try:
+    import nidaqmx
+    import nidaqmx.stream_readers
+    import nidaqmx.stream_writers
+except ImportError:
+    pass
+
 
 def _channel_collection(channel_class, **default_channel_kwargs):
     @functools.wraps(channel_class, updated=())
@@ -231,6 +238,163 @@ class AudioInterface(_StreamedInterface):
         return self._output_device['max_output_channels']
 
 
+class NationalInstrumentsConfigurableChannel(SimpleChannel):
+    """A configurable National instruments channel
+
+    Parameters
+    ----------
+    channel : int
+        The index of the channel, zero based.
+    label : str, default None
+        Optional label to assign the channel
+    voltage_range : numeric
+        The range in which to configure the channel.
+        Give a two values (min, max) or a single amplitude value.
+    terminal_config : str, default None
+        How to configure the terminals for the channel. Leave as None to use device default configuration.
+        Should be one of
+        - Differential: for a differential input
+        - Single ended: for a single ended measurement
+    """
+    def __init__(self, channel, label=None, voltage_range=None, terminal_config=None):
+        super().__init__(channel=channel, label=label)
+        self.voltage_range = voltage_range
+        self.terminal_config = terminal_config
+
+    def config(self, interface):
+        configs = {}
+        if self.voltage_range is not None:
+            try:
+                min_val, max_val = self.voltage_range
+            except TypeError:
+                min_val = -self.voltage_range
+                max_val = self.voltage_range
+            configs['min_val'] = min_val
+            configs['max_val'] = max_val
+        if self.terminal_config is not None:
+            if 'diff' in self.terminal_config.lower():
+                configs['terminal_config'] = nidaqmx.constants.TerminalConfiguration.BAL_DIFF
+            elif 'single' in self.terminal_config.lower():
+                configs['terminal_config'] = nidaqmx.constants.TerminalConfiguration.RSE
+            else:
+                raise ValueError(f'Unknown terminal configuration {self.terminal_config}')
+        return configs
+
+    def __repr__(self):
+        s = super().__repr__()[:-1]
+        voltage_range = '' if self.voltage_range is None else f', voltage_range={self.voltage_range}'
+        terminal_config = '' if self.terminal_config is None else f', terminal_config={self.terminal_config}'
+        return s + voltage_range + terminal_config + ')'
+
+
+class NationalInstrumentsInputChannel(NationalInstrumentsConfigurableChannel):
+    def config(self, interface):
+        return super().config(interface) | dict(physical_channel=f'{interface.name}/ai{self.channel}')
+
+
+class NationalInstrumentsOutputChannel(NationalInstrumentsConfigurableChannel):
+    def config(self, interface):
+        return super().config(interface) | dict(physical_channel=f'{interface.name}/ao{self.channel}')
+
+
+class NationalInstrumentsDaqmx(_StreamedInterface):
+    @classmethod
+    def list_interfaces(cls):
+        """Check what National Instruments hardware is available.
+
+        Returns
+        -------
+        interfaces : list
+            A list of all devices.
+        """
+        try:
+            system = nidaqmx.system.System.local()
+        except NameError as e:
+            if e.args[0] == "name 'nidaqmx' is not defined":
+                raise ModuleNotFoundError("Windows-only module 'nidaqmx' is not installed")
+            else:
+                raise e
+        name_list = [dev.name for dev in system.devices]
+        return name_list
+
+
+    def __init__(self, name=None, framesize=None, buffer_n_frames=25, **kwargs):
+        self.name = name or self.list_interfaces()[0]
+        self._device = nidaqmx.system.Device(self.name)
+        self._input_channels = _channel_collection(
+            NationalInstrumentsInputChannel,
+            terminal_config='single ended',
+            voltage_range=(min(self._device.ai_voltage_rngs), max(self._device.ai_voltage_rngs))
+        )
+        self._output_channels = _channel_collection(
+            NationalInstrumentsOutputChannel,
+            voltage_range=(min(self._device.ao_voltage_rngs), max(self._device.ao_voltage_rngs))
+        )
+        super().__init__(**kwargs)
+        self.framesize = framesize
+        self.buffer_n_frames = buffer_n_frames
+
+        if self.samplerate is None:
+            num_in = self.max_inputs
+            num_out = self.max_outputs
+            if num_in and num_out:
+                fs_in = self._device.ai_max_multi_chan_rate
+                fs_out = self._device.ao_max_rate
+                self.samplerate = (fs_out, fs_in)
+            elif num_in:
+                self.samplerate = self._device.ai_max_multi_chan_rate
+            elif num_out:
+                self.samplerate = self._device.ao_max_rate
+            else:
+                raise ValueError(f'National Instruments interface {self.name} seems to have neither inputs nor outputs')
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        try:
+            self._device.reset_device()
+        except (AttributeError, nidaqmx.DaqError):
+            pass
+
+    @property
+    def max_inputs(self):
+        return len(self._device.ai_physical_chans)
+
+    @property
+    def max_outputs(self):
+        return len(self._device.ao_physical_chans)
+
+    def setup(self, **kwargs):
+        super().setup(**kwargs)
+
+        self._input_task = nidaqmx.Task()
+        self._output_task = nidaqmx.Task()
+
+        for ch in self.input_channels:
+            self._input_task.ai_channels.add_ai_voltage_chan(**ch.config(self))
+
+        for ch in self.output_channels:
+            self._output_task.ao_channels.add_ao_voltage_chan(**ch.config(self))
+
+        try:
+            samplerate_upstream, samplerate_downstream = self.samplerate
+        except TypeError:
+            samplerate_upstream = samplerate_downstream = self.samplerate
+
+        try:
+            framesize_upstream, framesize_downstream = self.framesize
+        except TypeError:
+            framesize_upstream = framesize_downstream = self.framesize
+
+        if len(self.input_channels):
+            self._input_task.timing.cfg_samp_clk_timing(
+                rate=samplerate_downstream,
+                samps_per_chan=self.buffer_n_frames * framesize_downstream,
+                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS
+            )
+
+            self._databuffer = np.empty((self._input_task.in_stream.num_chans, framesize_downstream))
+            self._read = nidaqmx.stream_readers.AnalogMultiChannelReader(self._input_task.in_stream).read_many_sample
+            self._samples_read = 0
             self._input_task.register_every_n_samples_acquired_into_buffer_event(framesize_downstream, self._read_callback)
 
         if len(self.output_channels):
@@ -242,11 +406,160 @@ class AudioInterface(_StreamedInterface):
 
             self._write = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream).write_many_sample
             self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION
-            # self._write(np.zeros((self._output_task.out_stream.num_chans, framesize_upstream)))
-            self._write_countdown = None
             self._samples_written = 0
             self._output_frames = []
             self._write_callback(None, None, self.buffer_n_frames * framesize_downstream, None)
+            self._output_task.register_every_n_samples_transferred_from_buffer_event(framesize_upstream, self._write_callback)
+
+        if len(self.output_channels) and len(self.input_channels):
+            self._input_task.triggers.start_trigger.cfg_dig_edge_start_trig(f'/{self.name}/ao/StartTrigger')
+
+    def run(self):
+        if not self._is_ready:
+            self.setup(pipeline=True)
+        if len(self.input_channels):
+            self._input_task.start()
+        if len(self.output_channels):
+            self._output_task.start()
+
+    def stop(self):
+        if len(self.output_channels):
+            try:
+                self._output_task.stop()
+                self._output_task.wait_until_done(timeout=10)
+                self._output_task.close()
+            except nidaqmx.DaqError:
+                raise
+        if len(self.input_channels):
+            while self._samples_read < self._samples_written:
+                time.sleep(self.framesize / self.samplerate)
+            try:
+                self._input_task.stop()
+                self._input_task.wait_until_done(timeout=10)
+                self._input_task.close()
+            except nidaqmx.DaqError:
+                raise
+        self._is_ready = False  # The tasks are single use!
+
+    def _read_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
+        try:
+            self._read(self._databuffer, number_of_samples)
+        except nidaqmx.DaqError:
+            self.stop()
+            raise
+        self._samples_read += number_of_samples
+        self._output.input(self._databuffer.copy())
+        return 0
+
+    def _write_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
+        try:
+            frame = self._input.output(number_of_samples)
+        except _core.PipelineStop:
+            frame = np.zeros((len(self.output_channels), number_of_samples))
+            self._write(frame)
+            while self._output_task.out_stream.total_samp_per_chan_generated < self._samples_written:
+                time.sleep(self._output_task.out_stream.sleep_time)
+            self.stop()
+            return 0
+
+        self._write(frame)
+        self._samples_written += number_of_samples
+        return 0
+
+
+class NationalInstrumentsMultimoduleInputChannel(NationalInstrumentsConfigurableChannel):
+    def __init__(self, module, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.module = module
+
+    def __repr__(self):
+        s = super().__repr__()
+        pre, post = s.split('(')
+        return f'{pre}(module={self.module}, {post}'
+
+    def config(self, interface):
+        return interface.input_modules[self.module].ai_physical_chans[self.channel].name
+
+
+class NationalInstrumentsMultimoduleOutputChannel(NationalInstrumentsMultimoduleInputChannel):
+    def config(self, interface):
+        return interface.output_modules[self.module].ao_physical_chans[self.channel].name
+
+
+class CompactDaqmxMultimodule(NationalInstrumentsDaqmx):
+    @classmethod
+    def get_chassis(cls, name=None):
+        devices = cls.list_interfaces()
+        chassis = [dev for dev in devices if 'cDAQ' in dev and 'Mod' not in dev]
+        if name is None:
+            return chassis
+        if name not in chassis:
+            name = [dev for dev in chassis if str(name) in dev][0]
+        return nidaqmx.system.Device(name)
+
+    @classmethod
+    def get_modules(cls, chassis):
+        try:
+            chassis = chassis.name
+        except AttributeError:
+            pass
+        chassis = cls.get_chassis(chassis)
+        devs = cls.list_interfaces()
+        return [nidaqmx.system.Device(dev) for dev in devs if chassis in dev and 'Mod' in dev]
+
+    @classmethod
+    def reset_chassis_modules(cls, chassis):
+        for module in cls.get_modules(chassis):
+            nidaqmx.system.Device(module).reset_device()
+
+    _input_channels = _channel_collection(NationalInstrumentsMultimoduleInputChannel)
+    _output_channels = _channel_collection(NationalInstrumentsMultimoduleOutputChannel)
+
+    def __init__(self, name=None, **kwargs):
+        if name is None:
+            name = self.list_devices()[0]
+        self.chassis = self.get_chassis(name)
+        self.modules = self.get_modules(self.chassis)
+
+        # We need to set a default name for the NIDAQ class to initialize properly
+        if len(self.input_modules) > 0:
+            self.name = self.input_modules[0]
+        elif len(self.output_modules) > 0:
+            self.name = self.output_modules[0]
+        super().__init__(**kwargs)
+        del self.name
+
+        self.input_modules = [module for module in self.modules if len(module.ai_physical_chans) > 0]
+        self.output_modules = [module for module in self.modules if len(module.ao_physical_chans) > 0]
+
+    @property
+    def max_inputs(self):
+        inputs = 0
+        for module in self.input_modules:
+            inputs += len(module.ai_physical_chans)
+        return inputs
+
+    @property
+    def max_outputs(self):
+        outputs = 0
+        for module in self.output_modules:
+            outputs += len(module.ao_physical_chans)
+        return outputs
+
+    def setup(self, **kwargs):
+        super().setup(**kwargs)
+        if len(self.input_channels) and len(self.output_channels):
+            self._output_task.timing.samp_clk_timebase_src = self._input_task.timing.samp_clk_timebase_src
+            self._output_task.timing.samp_clk_timebase_rate = self._input_task.timing.samp_clk_timebase_rate
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        for module in self.input_modules:
+            module.reset_device()
+        for module in self.output_modules:
+            module.reset_device()
+
+
 class DummyInterface(_StreamedInterface):
     def __init__(self, framesize=None, **kwargs):
         super().__init__(**kwargs)
