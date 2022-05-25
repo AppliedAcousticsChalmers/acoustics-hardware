@@ -6,6 +6,7 @@ class Node:
     """Generic pipeline Node."""
 
     def __init__(self, input_node=None, output_node=None):
+        self._is_ready = True
         self.__input = None
         self.__output = None
         if input_node is not None:
@@ -13,29 +14,31 @@ class Node:
         if output_node is not None:
             self.insert_output(output_node)
 
-    def setup(self, pipeline=False):
+    def setup(self, pipeline=None):
         """Run setup for this Node.
 
         If the `pipeline` input is True, the entire pipeline will be setup.
         """
-        if not pipeline:
+        self._is_ready = True
+        if pipeline in (None, False):
             return
-        if isinstance(self._input, Node):
-            self._input.setup(True)
-        if isinstance(self._output, Node):
-            self._output.setup(True)
+        if isinstance(self._input, Node) and pipeline in ('upstream', 'both', True):
+            self._input.setup(pipeline='upstream')
+        if isinstance(self._output, Node) and pipeline in ('downstream', 'both', True):
+            self._output.setup(pipeline='downsteram')
 
-    def reset(self, pipeline=False):
+    def reset(self, pipeline=None):
         """Reset this Node.
 
         If the `pipeline` input is True, the entire pipeline will be reset.
         """
-        if not pipeline:
+        self._is_ready = False
+        if pipeline in (None, False):
             return
-        if isinstance(self._input, Node):
-            self._input.reset(True)
-        if isinstance(self._output, Node):
-            self._output.reset(True)
+        if isinstance(self._input, Node) and pipeline in ('upstream', 'both', True):
+            self._input.reset(pipeline='upstream')
+        if isinstance(self._output, Node) and pipeline in ('downstream', 'both', True):
+            self._output.reset(pipeline='downstream')
 
     def process(self, frame):
         """Process one frame of data."""
