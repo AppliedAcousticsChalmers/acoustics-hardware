@@ -104,3 +104,66 @@ class MaximumLengthGenerator(SignalGenerator):
         self.sequence, _ = scipy.signal.max_len_seq(self.order)
         self.signal = (1 - 2 * self.sequence).astype('float64')
 
+
+class ToneGenerator(_Generator):
+    _functions = {
+        'sin': np.sin,
+        'saw': scipy.signal.sawtooth,
+        'squ': scipy.signal.square
+    }
+
+    def __init__(
+        self,
+        frequency,
+        periods=None, duration=None,
+        phase_offset=0,
+        shape='sine',
+        shape_kwargs=None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        self.frequency = frequency
+        self.shape = shape
+        self.shape_kwargs = shape_kwargs if shape_kwargs is not None else {}
+        self.phase_offset = phase_offset
+
+        if periods is None and duration is None:
+            self.periods = np.inf
+        elif periods is not None:
+            self.periods = periods
+        elif duration is not None:
+            self.periods = duration * self.frequency
+        else:
+            raise ValueError('Cannot specify both duration and number of repetitions')
+
+        self.reset()
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._phase = 0
+
+    def process(self, framesize):
+        if self._phase >= self.periods * 2 * np.pi:
+            raise _core.PipelineStop()
+
+        phase = np.arange(framesize) * (2 * np.pi * self.frequency / self.samplerate)
+        signal = self._function(self._phase + self.phase_offset + phase, **self.shape_kwargs)
+        self._phase += 2 * np.pi * framesize * self.frequency / self.samplerate
+        if self._phase > self.periods * 2 * np.pi:
+            phase_to_mute = self._phase - self.periods * 2 * np.pi
+            samples_to_mute = np.math.floor(phase_to_mute / (2 * np.pi * self.frequency) * self.samplerate)
+            signal[-samples_to_mute:] = 0
+        return signal
+
+    @property
+    def shape(self):
+        return self._shape
+
+    @shape.setter
+    def shape(self, value):
+        if value[:3].lower() in self._functions:
+            self._shape = value
+            self._function = self._functions[value[:3].lower()]
+        else:
+            raise ValueError(f'Unknown tone shape {value}')
