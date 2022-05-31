@@ -437,13 +437,16 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
             self._output_task.start()
 
     def stop(self):
+        self._is_ready = False  # The tasks are single use!
+
         if len(self.output_channels):
             try:
                 self._output_task.stop()
                 self._output_task.wait_until_done(timeout=10)
                 self._output_task.close()
             except nidaqmx.DaqError:
-                raise
+                pass
+
         if len(self.input_channels):
             while self._samples_read < self._samples_written:
                 time.sleep(self.framesize / self.samplerate)
@@ -452,7 +455,7 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
                 self._input_task.wait_until_done(timeout=10)
                 self._input_task.close()
             except nidaqmx.DaqError:
-                raise
+                pass
 
     def _read_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
         try:
