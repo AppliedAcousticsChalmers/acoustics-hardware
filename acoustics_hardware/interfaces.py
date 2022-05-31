@@ -1,4 +1,4 @@
-from . import _core
+from . import _core, signal_tools
 import numpy as np
 import sounddevice as sd
 import time
@@ -331,6 +331,7 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
             voltage_range=(min(self._device.ao_voltage_rngs), max(self._device.ao_voltage_rngs))
         )
         super().__init__(**kwargs)
+        self._is_ready = False  # This class needs a proper setup!
         self.framesize = framesize
         self.buffer_n_frames = buffer_n_frames
 
@@ -363,60 +364,73 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
     def max_outputs(self):
         return len(self._device.ao_physical_chans)
 
-    def setup(self, **kwargs):
+    def setup(self, finite_samples=False, **kwargs):
         super().setup(**kwargs)
 
-        self._input_task = nidaqmx.Task()
-        self._output_task = nidaqmx.Task()
+        if len(self.input_channels):
+            self._input_task = nidaqmx.Task()
+            for ch in self.input_channels:
+                self._input_task.ai_channels.add_ai_voltage_chan(**ch.config(self))
 
-        for ch in self.input_channels:
-            self._input_task.ai_channels.add_ai_voltage_chan(**ch.config(self))
-
-        for ch in self.output_channels:
-            self._output_task.ao_channels.add_ao_voltage_chan(**ch.config(self))
+        if len(self.output_channels):
+            self._output_task = nidaqmx.Task()
+            for ch in self.output_channels:
+                self._output_task.ao_channels.add_ao_voltage_chan(**ch.config(self))
 
         try:
             samplerate_upstream, samplerate_downstream = self.samplerate
         except TypeError:
             samplerate_upstream = samplerate_downstream = self.samplerate
 
-        try:
-            framesize_upstream, framesize_downstream = self.framesize
-        except TypeError:
-            framesize_upstream = framesize_downstream = self.framesize
+        if finite_samples is False:
+            try:
+                framesize_upstream, framesize_downstream = self.framesize
+            except TypeError:
+                framesize_upstream = framesize_downstream = self.framesize
+            samps_per_chan_read = self.buffer_n_frames * framesize_downstream
+            samps_per_chan_write = self.buffer_n_frames * framesize_upstream
+            sample_mode = nidaqmx.constants.AcquisitionType.CONTINUOUS
+        else:
+            try:
+                samps_per_chan_write, samps_per_chan_read = finite_samples
+            except TypeError:
+                samps_per_chan_write = samps_per_chan_read = finite_samples
+            sample_mode = nidaqmx.constants.AcquisitionType.FINITE
 
         if len(self.input_channels):
             self._input_task.timing.cfg_samp_clk_timing(
                 rate=samplerate_downstream,
-                samps_per_chan=self.buffer_n_frames * framesize_downstream,
-                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS
+                samps_per_chan=samps_per_chan_read,
+                sample_mode=sample_mode
             )
-
-            self._databuffer = np.empty((self._input_task.in_stream.num_chans, framesize_downstream))
-            self._read = nidaqmx.stream_readers.AnalogMultiChannelReader(self._input_task.in_stream).read_many_sample
-            self._samples_read = 0
-            self._input_task.register_every_n_samples_acquired_into_buffer_event(framesize_downstream, self._read_callback)
+            if finite_samples is False:
+                self._databuffer = np.empty((self._input_task.in_stream.num_chans, framesize_downstream))
+                self._read = nidaqmx.stream_readers.AnalogMultiChannelReader(self._input_task.in_stream).read_many_sample
+                self._samples_read = 0
+                self._input_task.register_every_n_samples_acquired_into_buffer_event(framesize_downstream, self._read_callback)
 
         if len(self.output_channels):
             self._output_task.timing.cfg_samp_clk_timing(
                 rate=samplerate_upstream,
-                samps_per_chan=self.buffer_n_frames * framesize_upstream,
-                sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS
+                samps_per_chan=samps_per_chan_write,
+                sample_mode=sample_mode
             )
 
-            self._write = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream).write_many_sample
-            self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION
-            self._samples_written = 0
-            self._output_frames = []
-            self._write_callback(None, None, self.buffer_n_frames * framesize_downstream, None)
-            self._output_task.register_every_n_samples_transferred_from_buffer_event(framesize_upstream, self._write_callback)
+            if finite_samples is False:
+                self._write = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream).write_many_sample
+                self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION
+                self._samples_written = 0
+                self._write_callback(None, None, self.buffer_n_frames * framesize_downstream, None)
+                self._output_task.register_every_n_samples_transferred_from_buffer_event(framesize_upstream, self._write_callback)
 
         if len(self.output_channels) and len(self.input_channels):
             self._input_task.triggers.start_trigger.cfg_dig_edge_start_trig(f'/{self.name}/ao/StartTrigger')
 
+
     def run(self):
         if not self._is_ready:
             self.setup(pipeline=True)
+
         if len(self.input_channels):
             self._input_task.start()
         if len(self.output_channels):
@@ -439,7 +453,6 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
                 self._input_task.close()
             except nidaqmx.DaqError:
                 raise
-        self._is_ready = False  # The tasks are single use!
 
     def _read_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
         try:
@@ -465,6 +478,34 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
         self._write(frame)
         self._samples_written += number_of_samples
         return 0
+
+    def process(self, frame=None, framesize=None):
+        if frame is not None:
+            padded_frame = signal_tools.pad_signals(frame, post_pad=1)
+        if framesize is None and len(self.input_channels):
+            try:
+                samplerate_upstream, samplerate_downstream = self.samplerate
+            except TypeError:
+                samplerate_upstream = samplerate_downstream = self.samplerate
+            framesize = np.math.ceil(padded_frame.shape[-1] * samplerate_downstream / samplerate_upstream)
+        self.setup(finite_samples=(padded_frame.shape[-1], framesize), pipeline=True)
+
+        if len(self.input_channels):
+            self._input_task.start()
+
+        if len(self.output_channels):
+            timeout = frame.shape[-1] / samplerate_upstream * 1.2 + 5
+            self._output_task.write(padded_frame)
+            self._output_task.start()
+            self._output_task.wait_until_done(timeout=timeout)
+            self._output_task.close()
+
+        if len(self.input_channels):
+            timeout = framesize / samplerate_downstream * 1.2 + 5
+            read_frame = self._input_task.read(framesize, timeout=timeout)
+            read_frame = np.asarray(read_frame)
+            self._input_task.close()
+            return read_frame[..., 1:]
 
 
 class NationalInstrumentsMultimoduleInputChannel(NationalInstrumentsConfigurableChannel):
