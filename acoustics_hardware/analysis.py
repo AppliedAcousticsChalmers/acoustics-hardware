@@ -215,16 +215,27 @@ def mls_analysis(reference, output):
     else:
         response = output[:, :seq_len]
 
-    ps = np.zeros(seq_len, dtype=np.int64)
-    for idx in range(seq_len):
-        for s in range(order):
-            ps[idx] += reference[(idx - s) % seq_len] << (order - 1 - s)
+    if order <= 8:
+        dtype = np.uint8
+    elif order <= 16:
+        dtype = np.uint16
+    elif order <= 32:
+        dtype = np.uint32
+    elif order <= 64:
+        dtype = np.uint64
+    else:
+        assert False, "You would need at least one zettabyte memory to store this array..."
 
-    indices = np.argsort(ps)[2**np.arange(order - 1, -1, -1) - 1]
-    pl = np.zeros(seq_len, dtype=np.int64)
-    for idx in range(seq_len):
-        for s in range(order):
-            pl[idx] += reference[(indices[s] - idx) % seq_len] << (order - s - 1)
+    ps = np.zeros(seq_len, dtype=dtype)
+    idx = np.arange(seq_len)  # Cannot be uint since it will be subtracted to be negative!
+    ref = reference.astype(dtype)
+    for s in range(order):
+        ps[idx] += ref[(idx - s) % seq_len] << (order - 1 - s)
+
+    indices = np.argsort(ps)[2**np.arange(order - 1, -1, -1, dtype=dtype) - 1]  # This also will not be uint.
+    pl = np.zeros(seq_len, dtype=dtype)
+    for s in range(order):
+        pl += ref[(indices[s] - idx) % seq_len] << (order - s - 1)
 
     transform = np.zeros((output.shape[0], seq_len + 1))
     transform[:, ps] = response
