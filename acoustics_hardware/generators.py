@@ -124,14 +124,62 @@ class SweepGenerator(SignalGenerator):
 
 
 class MaximumLengthGenerator(SignalGenerator):
-    def __init__(self, order, **kwargs):
+    def __init__(self, order=None, sequence_time=None, **kwargs):
         super().__init__(**kwargs)
-        self.order = order
+        if None not in (order, sequence_time):
+            raise ValueError('Cannot give both MLS order and MLS time')
+        elif sequence_time is not None:
+            self._sequence_time = sequence_time
+        elif order is not None:
+            self.order = order
+
+    @property
+    def sequence_time(self):
+        try:
+            return self._sequence_time
+        except AttributeError:
+            pass
+        try:
+            return (2**self.order - 1) / self.samplerate
+        except AttributeError:
+            raise AttributeError('Cannot use MLS sequence time without a defined samplerate')
+
+    @sequence_time.setter
+    def sequence_time(self, value):
+        try:
+            n_samples = self.samplerate * value
+        except AttributeError:
+            self._sequence_time = value
+            del self._order
+        else:
+            self.order = np.math.ceil(np.log2(n_samples + 1))
+
+    @property
+    def order(self):
+        try:
+            return self._order
+        except AttributeError:
+            pass
+        try:
+            n_samples = self.samplerate * self._sequence_time
+        except AttributeError:
+            raise AttributeError('Cannot use MLS sequence time without a defined samplerate')
+        return np.math.ceil(np.log2(n_samples + 1))
+
+    @order.setter
+    def order(self, value):
+        if not isinstance(value, int):
+            raise TypeError(f"Cannot set order to non-integer value {value}")
+        self._order = value
+        try:
+            del self._sequence_time
+        except AttributeError:
+            pass
 
     def setup(self, **kwargs):
         super().setup(**kwargs)
-        self.sequence, _ = scipy.signal.max_len_seq(self.order)
-        self.signal = (1 - 2 * self.sequence).astype('float64')
+        self.reference, _ = scipy.signal.max_len_seq(self.order)
+        self.signal = (1 - 2 * self.reference).astype('float64')
 
 
 class ToneGenerator(_Generator):
