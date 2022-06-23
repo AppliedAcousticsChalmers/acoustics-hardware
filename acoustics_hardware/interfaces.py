@@ -469,7 +469,7 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
 
     def _write_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
         try:
-            frame = self._input.output(number_of_samples)
+            frame = self._input.output(number_of_samples).squeeze()
         except _core.PipelineStop:
             frame = np.zeros((len(self.output_channels), number_of_samples))
             self._write(frame)
@@ -498,7 +498,7 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
 
         if len(self.output_channels):
             timeout = frame.shape[-1] / samplerate_upstream * 1.2 + 5
-            self._output_task.write(padded_frame)
+            self._output_task.write(padded_frame.squeeze())
             self._output_task.start()
             self._output_task.wait_until_done(timeout=timeout)
             self._output_task.close()
