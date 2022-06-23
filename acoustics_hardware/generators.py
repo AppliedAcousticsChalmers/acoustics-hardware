@@ -60,21 +60,29 @@ class SignalGenerator(_Generator):
         signal_length = self.signal.shape[-1]
 
         if stop_idx <= signal_length:
-            self._sample_index += framesize
             frame = self.signal[..., start_idx:stop_idx]
         else:
-            self._repetitions_done += 1
-            first_part = self.signal[..., start_idx:]
-            if self._repetitions_done < self.repetitions:
-                # We should keep repeating the signal
-                self._sample_index = stop_idx % signal_length
-                second_part = self.signal[..., :self._sample_index]
-                frame = np.concatenate([first_part, second_part], axis=-1)
-            else:
-                if first_part.size == 0:
-                    raise _core.PipelineStop()
-                frame = signal_tools.extend_signals(first_part, length=framesize)
+            num_repeats = np.math.ceil(stop_idx / signal_length)
+            repeated_signal = np.tile(self.signal, num_repeats)
+            frame = repeated_signal[..., start_idx:stop_idx]
+
+        repeats, self._sample_index = divmod(stop_idx, signal_length)
+        self._repetitions_done += repeats
+        if self._repetitions_done >= self.repetitions:
+            if self._sample_index > 0:
+                frame[..., -self._sample_index:] = 0
+
         return super().process(frame)
+
+    def once(self):
+        if self._sample_index != 0 and self._repetitions_done != 0:
+            raise RuntimeError('Cannot use method `once` on generator which is running in a streamed pipeline!')
+        framesize = self.repetitions * self.signal.shape[-1]
+        frame = self.input(framesize)
+        self._sample_index = self._repetitions_done = 0
+        return frame
+        # frame = np.tile(self.signal, self.repetitions)
+        # self.super().process(frame)
 
 
 class SweepGenerator(SignalGenerator):
