@@ -11,11 +11,13 @@ class _Generator(_core.SamplerateFollower):
 class SignalGenerator(_Generator):
     def __init__(
         self, signal=None, repetitions=1,
+        amplitude=1,
         fade_in=None, fade_out=None,
         pre_pad=None, post_pad=None,
         **kwargs
     ):
         super().__init__(**kwargs)
+        self.amplitude = amplitude
         self.fade_in = fade_in
         self.fade_out = fade_out
         self.pre_pad = pre_pad
@@ -36,13 +38,18 @@ class SignalGenerator(_Generator):
 
     @property
     def signal(self):
+        try:
+            return self._signal
+        except AttributeError:
+            pass
+        self.setup()
         return self._signal
 
     @signal.setter
     def signal(self, signal):
         signal = signal_tools.fade_signals(signal, fade_in=self.fade_in, fade_out=self.fade_out, samplerate=self.samplerate, inplace=False)
         signal = signal_tools.pad_signals(signal, pre_pad=self.pre_pad, post_pad=self.post_pad, samplerate=self.samplerate)
-        self._signal = signal
+        self._signal = signal * self.amplitude
 
     def process(self, framesize):
         if self._repetitions_done >= self.repetitions:
