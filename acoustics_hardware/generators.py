@@ -90,12 +90,14 @@ class SweepGenerator(SignalGenerator):
         self,
         lower_frequency, upper_frequency,
         sweep_length, method='logarithmic',
+        amplitude_slope=None,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.lower_frequency = lower_frequency
         self.upper_frequency = upper_frequency
         self.sweep_length = sweep_length
+        self.amplitude_slope = amplitude_slope
         self.method = method
 
     def setup(self, **kwargs):
@@ -106,7 +108,19 @@ class SweepGenerator(SignalGenerator):
         while np.sign(signal[last_crossing - 1]) == np.sign(signal[-1]):
             last_crossing -= 1
         signal[last_crossing:] = 0
-        self.signal = signal
+        if self.amplitude_slope is not None:
+            end_value = 10**(6 * self.amplitude_slope / 20 * np.log2(self.upper_frequency / self.lower_frequency))
+            if self.method == 'logarithmic':
+                slope = np.geomspace(1, end_value, signal.size)
+            elif self.method == 'linear':
+                slope = np.linspace(1, end_value, signal.size)
+            else:
+                raise ValueError(f'Cannot use amplitude compensation with sweep method {self.method}')
+            slope /= max(slope)
+        else:
+            slope = 1
+        self.reference = signal.copy()
+        self.signal = signal * slope
 
 
 class MaximumLengthGenerator(SignalGenerator):
