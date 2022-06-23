@@ -3,6 +3,17 @@ import scipy.signal
 from . import signal_tools
 
 
+def dB(x, power=False, safe_zeros=True):
+    if safe_zeros:
+        x = signal_tools.nonzero_signals(x)
+    if power:
+        if np.any(x < 0):
+            return 10 * np.log10(x + 0j)
+        return 10 * np.log10(x)
+    else:
+        return 20 * np.log10(np.abs(x))
+
+
 def sweep_deconvolution(
     reference_signal,
     measured_signal,
