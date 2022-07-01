@@ -1,21 +1,27 @@
 import queue
+
 import numpy as np
 import sounddevice as sd
+
 from . import core
 
 try:
+    # noinspection PyPackageRequirements
     import nidaqmx
+    # noinspection PyPackageRequirements
     import nidaqmx.stream_readers
+    # noinspection PyPackageRequirements
     import nidaqmx.stream_writers
 except ImportError:
-    pass
+    nidaqmx = None
 
 
+# noinspection PyUnusedLocal
 class AudioDevice(core.Device):
     """Class for interacting with audio interfaces.
 
     Implementation of the `~.core.Device` framework for audio interfaces.
-    Built on top of the `sounddevice <http://python-sounddevice.readthedocs.io/>`_ package.
+    Built on top of the `sounddevice <https://python-sounddevice.readthedocs.io/>`_ package.
 
     Arguments:
         name (`str`): Partial or full name of the audio interface.
@@ -59,6 +65,7 @@ class AudioDevice(core.Device):
         self.inputs = []
         self.outputs = []
 
+    # noinspection PyProtectedMember
     def _hardware_run(self):
         while sd._initialized > 0:
             sd._terminate()
@@ -111,6 +118,7 @@ class AudioDevice(core.Device):
         return sd.query_devices(self.name)['max_output_channels']
 
 
+# noinspection PyShadowingBuiltins
 class NIDevice(core.Device):
     """Class for interacting with national instruments hardware.
 
@@ -132,20 +140,17 @@ class NIDevice(core.Device):
 
         Since `NIDevice` is intended to interact with a single module at the
         time, this will complete names by selecting the first available module
-        is a chassi.
+        is a chassis.
 
         Arguments:
             name (`str`, optional): incomplete name of device or ``None``
         Returns:
             Complete name of device, or list of all devices.
         """
-        try:
-            system = nidaqmx.system.System.local()
-        except NameError as e:
-            if e.args[0] == "name 'nidaqmx' is not defined":
-                raise ModuleNotFoundError("Windows-only module 'nidaqmx' is not installed")
-            else:
-                raise e
+        if nidaqmx is None:
+            raise ModuleNotFoundError(
+                "Windows-only module 'nidaqmx' is not installed")
+        system = nidaqmx.system.System.local()
         name_list = [dev.name for dev in system.devices]
         if name is None:
             return name_list
@@ -256,13 +261,13 @@ class NIDevice(core.Device):
             return mapping
 
     def bit_depth(self, channel=None):
-        """The bitdepth for the device.
+        """The bit depth for the device.
 
         Currently only implemented for input devices.
 
         Todo:
             - What would be the expected behavior if the channels have different depths?
-            - Chack that the task exists, else warn.
+            - Check that the task exists, else warn.
         """
         if channel is None:
             ch_idx = 0
@@ -277,7 +282,7 @@ class NIDevice(core.Device):
         Currently only implemented for input devices.
 
         Todo:
-            - Chack that the task exists, else warn.
+            - Check that the task exists, else warn.
         """
         if channel is None:
             return max([ch.ai_raw_samp_size for ch in self._input_task.ai_channels])
@@ -292,7 +297,7 @@ class NIDevice(core.Device):
         input voltage from unscaled integers.
 
         Todo:
-            - Chack that the task exists, else warn.
+            - Check that the task exists, else warn.
         """
         if channels is None:
             channels = self.inputs
@@ -318,17 +323,17 @@ class NIDevice(core.Device):
             self._output_task.ao_channels.add_ao_voltage_chan(self.output_modules[module] + '/ao{}'.format(int(channel)), min_val=output_range[0], max_val=output_range[1])
         if len(self.inputs) and len(self.outputs):
             self._input_task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
-                    sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+                                                        sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
             self._output_task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
-                    sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+                                                         sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
             self._output_task.timing.samp_clk_timebase_src = self._input_task.timing.samp_clk_timebase_src
             self._output_task.timing.samp_clk_timebase_rate = self._input_task.timing.samp_clk_timebase_rate
         elif len(self.inputs):
             self._input_task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
-                    sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+                                                        sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
         elif len(self.outputs):
             self._output_task.timing.cfg_samp_clk_timing(int(self.fs), samps_per_chan=self.framesize,
-                    sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
+                                                         sample_mode=nidaqmx.constants.AcquisitionType.CONTINUOUS)
 
         if self.dtype.lower() == 'unscaled' or self.dtype.lower() == 'int':
             wl = self.word_length()
@@ -356,9 +361,10 @@ class NIDevice(core.Device):
                 databuffer = np.empty((len(self.inputs), self.framesize), dtype='float64')
                 read_function = reader.read_many_sample
 
+            # noinspection PyUnusedLocal
             def input_callback(task_handle, every_n_samples_event_type,
                                number_of_samples, callback_data):
-                sampsRead = read_function(databuffer, self.framesize)
+                _ = read_function(databuffer, self.framesize)
                 self._hardware_input_Q.put(databuffer.copy())
                 return 0
             self._input_task.register_every_n_samples_acquired_into_buffer_event(self.framesize, input_callback)
@@ -371,6 +377,7 @@ class NIDevice(core.Device):
             write_funciton(np.zeros((self._output_task.out_stream.num_chans, 2*self.framesize)))  # Pre-fill the buffer with zeros, there needs to be something in the buffer when we start
             timeout = 0.95 * self.framesize / self.fs
 
+            # noinspection PyUnusedLocal
             def output_callback(task_handle, every_n_samples_event_type,
                                 number_of_samples, callback_data):
                 try:
@@ -380,7 +387,7 @@ class NIDevice(core.Device):
                 else:
                     self._hardware_output_Q.task_done()
                 finally:
-                    sampsWritten = write_funciton(data)
+                    _ = write_funciton(data)
                 return 0
             self._output_task.register_every_n_samples_transferred_from_buffer_event(self.framesize, output_callback)
             self._output_task.start()

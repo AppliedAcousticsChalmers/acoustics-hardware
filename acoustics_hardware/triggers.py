@@ -1,7 +1,7 @@
-import numpy as np
-import threading
 import logging
-import warnings
+import threading
+
+import numpy as np
 
 from . import processors
 
@@ -17,9 +17,9 @@ class Trigger:
     e.g. activate the input of a Device.
 
     Arguments:
-        actions (callable or list of callables): The actions that will be
+        action (callable or list of callables): The actions that will be
             called each time the test evaluates to ``True``.
-        false_actions (callable or list of callables): The actions that will be
+        false_action (callable or list of callables): The actions that will be
             called each time the test evaluates to ``False``.
         auto_deactivate (`bool`): Sets if the trigger deactivates itself when
             the test is ``True``. Useful to only trigger once, dafault ``True``.
@@ -62,6 +62,8 @@ class Trigger:
 
         self.auto_deactivate = auto_deactivate
         self.use_calibrations = use_calibrations
+
+        self.calibrations = None
 
     def __call__(self, frame):
         """Manages testing and actions."""
@@ -187,10 +189,10 @@ class RMSTrigger(Trigger):
         return self._sign * levels >= self.trigger_level * self._sign
         # meets_criteria = self._sign * levels > self.trigger_level * self._sign
         # if any(meets_criteria):
-            # self.trigger_alignment = np.where(meets_criteria)[0][0]
-            # return True
+        #     self.trigger_alignment = np.where(meets_criteria)[0][0]
+        #     return True
         # else:
-            # return False
+        #     return False
 
     def reset(self):
         super().reset()
@@ -236,7 +238,7 @@ class PeakTrigger(Trigger):
         self.channel = channel
 
     def test(self, frame):
-        # logger.debug('Testing in Peak triggger')
+        # logger.debug('Testing in Peak trigger')
         levels = np.abs(frame[self.channel])
         return self._sign * levels >= self.trigger_level * self._sign
         # return any(self._sign * levels > self.trigger_level * self._sign)
@@ -261,13 +263,13 @@ class PeakTrigger(Trigger):
 class DelayedAction:
     """Delays an action.
 
-    When called, an instance of this class will excecute a specified action
+    When called, an instance of this class will execute a specified action
     after a set delay. This can be useful to create timed measurements or
     pauses in a longer sequence.
 
     Arguments:
         action (callable): Any callable action. This can be a callable class,
-            a user defined funciton, or a method of another class.
+            a user defined function, or a method of another class.
             If several actions are required, pass an iterable of callables.
         time (`float`): The delay time, in seconds.
     """

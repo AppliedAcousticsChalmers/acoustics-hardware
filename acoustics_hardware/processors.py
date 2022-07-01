@@ -60,6 +60,7 @@ class LevelDetector(Processor):
         self.time_constant = time_constant
 
         self.channel = channel
+        self._buffer = None
         self.reset()
 
     def process(self, frame):

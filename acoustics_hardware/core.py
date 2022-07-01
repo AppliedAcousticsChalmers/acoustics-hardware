@@ -1,17 +1,19 @@
-import warnings
+import collections
+import json
+# import multiprocessing
 import queue
 import threading
-# import multiprocessing
-import collections
+import warnings
+
 import numpy as np
 import scipy.signal
-from . import utils
-import json
-from .generators import GeneratorStop
+
 from .distributors import QDistributor
+from .generators import GeneratorStop
 
 
-class Device:
+# noinspection PyShadowingBuiltins
+class Device(object):
     """Abstract class that provides a consistent framework for different hardware.
 
     An instance of a specific implementation of of `Device` is typically linked
@@ -33,8 +35,8 @@ class Device:
     Todo:
         Remove the `add_trigger`, `remove_trigger`, `add_distributor`, `remove_distributor` and possibly
         `add_generator` and `remove_generator`. Since these other objets will (almost) always have a single device
-        which devines the input data for the object it would be reasonable to have said device as a property of that
-        object. The code to manage adding/removing from the device will then be implenented in those objects. This
+        which defines the input data for the object it would be reasonable to have said device as a property of that
+        object. The code to manage adding/removing from the device will then be implemented in those objects. This
         wil in the long run reduce the number of calls, since the device can be given as an input argument when creating
         the objects. It also allows subclasses to customize how the objects are added to the device.
 
@@ -62,6 +64,11 @@ class Device:
         self.__main_stop_event = threading.Event()
         # self.__main_thread = multiprocessing.Process()
         self.__main_thread = threading.Thread()
+
+        self.fs = None
+        self.framesize = None
+        self._pre_triggering = None
+        self._post_triggering = None
 
         kwargs.setdefault('fs', 1)  # This is required for all devices
         kwargs.setdefault('framesize', 1)
@@ -99,14 +106,15 @@ class Device:
         if not self.initialized:
             self.initialize()
         if timed:
-            timer = threading.Timer(interval=timed, function=self.stop, kwargs={"input":input, "output":output})
+            timer = threading.Timer(interval=timed, function=self.stop,
+                                    kwargs={"input": input, "output": output})
             timer.start()
 
         if input:
             self.input_active.set()
         if output:
             self.output_active.set()
-        if blocking:
+        if timed and blocking:
             timer.join()
 
     def stop(self, input=True, output=True):
@@ -200,7 +208,7 @@ class Device:
         If the device has registered inputs, they should always be read and frames
         should be put in the input Q (in the order registered).
         If the device has registered outputs, frames should be taken from the output Q
-        and and output through the physical channels (in the order registered).
+        and output through the physical channels (in the order registered).
         If a specific hardware requires constant data streams, fill the stream
         with zeros if no output data is available. The timings for this must be
         implemented by this method.
@@ -255,6 +263,7 @@ class Device:
             if do_relese:
                 self.__input_data_lock.release()
 
+    # noinspection PyUnusedLocal
     def calibrate(self, channel, frequency=1e3, value=1, ctype='rms', unit='V'):
         """Calibrates a channel using a reference signal.
 
@@ -333,7 +342,7 @@ class Device:
         events that connect the other threads, as well as initializing the
         distributors.
         """
-        # The explicit naming of this method is needed on windows for some stange reason.
+        # The explicit naming of this method is needed on Windows for some strange reason.
         # If we rely on the automatic name wrangling for the process target, it will not be found in device subclasses.
         self._hardware_input_Q = queue.Queue()
         self._hardware_output_Q = MasterSlaveQueue(maxsize=2)
@@ -344,7 +353,7 @@ class Device:
             if self.__internal_distributor is None:
                 raise AttributeError
         except AttributeError:
-            with warnings.catch_warnings() as w:
+            with warnings.catch_warnings():
                 warnings.filterwarnings('ignore', module='acoustics_hardware.distributors')
                 self.__internal_distributor = QDistributor(device=self)
 
@@ -382,7 +391,7 @@ class Device:
     def __trigger_target(self):
         """Trigger handling method.
 
-        This method will execute as a subthread in the device, responsible
+        This method will execute as a sub-thread in the device, responsible
         for managing the attached triggers, and handling input data.
 
         Todo:
@@ -422,7 +431,7 @@ class Device:
             # If the trigger is active, move everything from the data buffer to the triggered Q
             if self.input_active.is_set() and not triggered:
                 collecting_input = self.__input_data_lock.acquire()
-                # Triggering happened between this frame and the last, do pre-prigger aligniment
+                # Triggering happened between this frame and the last, do pre-trigger alignment
                 triggered = True
                 trigger_sample_index = int(self._trigger_alignment * self.fs) + (len(data_buffer) - 1) * self.framesize - pre_trigger_samples
                 while trigger_sample_index > 0:
@@ -433,10 +442,10 @@ class Device:
                     trigger_sample_index -= self.framesize
                 remaining_samples = len(data_buffer) * self.framesize
             elif self.input_active.is_set():
-                # Continue miving data to triggered Q
+                # Continue moving data to triggered Q
                 remaining_samples += self.framesize
             elif not self.input_active.is_set() and triggered:
-                # Just detriggered, set remaining samples correctly
+                # Just de-triggered, set remaining samples correctly
                 triggered = False
                 remaining_samples = post_trigger_samples + int(self._trigger_alignment * self.fs) + 1
 
@@ -459,7 +468,7 @@ class Device:
     def __distributor_target(self):
         """Queue handling method.
 
-        This method will execute as a subthread in the device, responsible
+        This method will execute as a sub-thread in the device, responsible
         for moving data from the input (while active) to the queues used by
         Distributors.
 
@@ -490,7 +499,7 @@ class Device:
     def __generator_target(self):
         """Generator handling method.
 
-        This method will execute as a subthread in the device, responsible
+        This method will execute as a sub-thread in the device, responsible
         for managing attached generators, and generating output frames from
         the generators.
         """
@@ -597,6 +606,7 @@ class Channel(int):
         return super(Channel, cls).__new__(cls, index)
 
     def __init__(self, index, chtype, label=None, calibration=None, unit=None):
+        super().__init__()
         self.index = index
         self.chtype = chtype
         self.label = label

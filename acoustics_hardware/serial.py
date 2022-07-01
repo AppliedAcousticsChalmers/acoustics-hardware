@@ -1,6 +1,6 @@
 # from threading import Thread, Event
-from serial import Serial, serial_for_url
 import schunk
+from serial import Serial, serial_for_url
 
 
 class SerialGenerator:  # (Thread):
@@ -50,9 +50,9 @@ class SerialGenerator:  # (Thread):
         self.ser.close()
 
     def _write(self, *commands):
-        '''
+        """
         Wrapper for writing to connected device
-        '''
+        """
         for command in commands:
             self.ser.write(bytes(command + '\n', 'UTF-8'))
 
@@ -74,16 +74,16 @@ class SerialGenerator:  # (Thread):
             return errors
 
     def _sweep_setup(self):
-        if not self.sweep_start == self._prev_sweep_settings['start']:
+        if self.sweep_start != self._prev_sweep_settings['start']:
             self._prev_sweep_settings['start'] = self.sweep_start
             self._write('frequency:start {}'.format(self.sweep_start))
-        if not self.sweep_stop == self._prev_sweep_settings['stop']:
+        if self.sweep_stop != self._prev_sweep_settings['stop']:
             self._prev_sweep_settings['stop'] = self.sweep_stop
             self._write('frequency:stop {}'.format(self.sweep_stop))
-        if not self.sweep_time == self._prev_sweep_settings['time']:
+        if self.sweep_time != self._prev_sweep_settings['time']:
             self._prev_sweep_settings['time'] = self.sweep_time
             self._write('sweep:time {}'.format(self.sweep_time))
-        if not self.sweep_spacing == self._prev_sweep_settings['spacing']:
+        if self.sweep_spacing != self._prev_sweep_settings['spacing']:
             self._prev_sweep_settings['spacing'] = self.sweep_spacing
             self._write('sweep:spacing {}'.format(self.sweep_spacing))
 
@@ -153,9 +153,8 @@ class VariSphere:
             to not use this motor. Default 4001.
         el_port (`str`): The port for the elevation motor. Specify `None` or `False`
             to not use this motor. Default 4002.
-        ip (`str`): Ip adress of the ethernet-to-serial interface. Specify `None`
+        ip (`str`): Ip address of the ethernet-to-serial interface. Specify `None`
             or `False` to use comports mode. Default `192.168.127.120`.
-
     """
     def __init__(self, az_port='4001', el_port='4002', ip='192.168.127.120'):
         self.az = None

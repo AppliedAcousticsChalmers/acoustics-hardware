@@ -1,8 +1,9 @@
-import numpy as np
-from numpy.fft import rfft as fft, irfft as ifft
-from scipy.signal import waveforms, max_len_seq
 import queue
-import warnings
+
+import numpy as np
+from numpy.fft import irfft as ifft, rfft as fft
+from scipy.signal import max_len_seq, waveforms
+
 from . import utils
 
 
@@ -58,10 +59,12 @@ class Generator:
             # Unregister from the previous device
             if self.device.initialized:
                 self.reset()
+            # noinspection PyProtectedMember
             self.device._Device__generators.remove(self)
         self._device = dev
         if self.device is not None:
             # Register to the new device
+            # noinspection PyProtectedMember
             self.device._Device__generators.append(self)
             if self.device.initialized:
                 self.setup()
@@ -100,6 +103,7 @@ class QGenerator(Generator):
             samples_left -= gen_frame[-1].shape[-1]
         while samples_left > 0:
             try:
+                # noinspection PyProtectedMember
                 frame = self.Q.get(timeout=self.device._generator_timeout)
             except queue.Empty:
                 raise GeneratorStop('Input Q is empty')
@@ -118,19 +122,23 @@ class QGenerator(Generator):
 
 
 class ArbitrarySignalGenerator(Generator):
-    """Repeated generation of arbritrary signals.
+    """Repeated generation of arbitrary signals.
 
-    Implementation of `Generator` for arbritrary signals.
+    Implementation of `Generator` for arbitrary signals.
 
     Arguments:
-        repetitions (`float`): The number of cycles to output before stopping, default `np.inf`.
-        **kwargs: Will be saved as ``kwargs`` and accessible in `setup`.
+        repetitions (`float`): The number of cycles to output before stopping,
+        default `np.inf`. **kwargs: Will be saved as ``kwargs`` and
+        accessible in `setup`.
     Keyword Arguments:
         signal (`numpy.ndarray`): One cycle of the signal to output.
     """
     def __init__(self, repetitions=np.inf, **kwargs):
         super().__init__(**kwargs)
-        self.repetitions = repetitions  # Default to continious output
+        self.repetitions = repetitions  # Default to continuous output
+        self.signal = None
+        self.idx = None
+        self.repetitions_done = None
         self.reset()
 
     def frame(self):
@@ -165,7 +173,7 @@ class ArbitrarySignalGenerator(Generator):
         It is possible to inherit `ArbitrarySignalGenerator` and override the
         setup method. Create one cycle of the signal and store it in
         ``self.signal``. Access the underlying device as ``self.device``,
-        which has important properties, e.g. samplerate ``fs``.
+        which has important properties, e.g. sampling rate ``fs``.
         All keyword arguments passed while creating instances are available
         as ``self.key``.
 
@@ -201,8 +209,11 @@ class SweepGenerator(ArbitrarySignalGenerator):
 
     def setup(self):
         super().setup()
-        time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
-        self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
+        time_vector = (np.arange(round(self.duration * self.device.fs))
+                       / self.device.fs)
+        self.signal = waveforms.chirp(time_vector, self.start_frequency,
+                                      self.duration, self.stop_frequency,
+                                      method=self.method, phi=90)
         if self.bidirectional:
             self.signal = np.concatenate([self.signal, self.signal[::-1]])
             self.repetitions /= 2
@@ -212,14 +223,15 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
     """Generation of maximum length sequences.
 
     Arguments:
-        order (`int`): The order or the sequence. The total length  is ``2**order - 1``.
-        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
+        order (`int`): The order or the sequence. The total length  is
+            ``2**order - 1``.
     See Also:
         `ArbitrarySignalGenerator`, `scipy.signal.max_len_seq`
     """
     def __init__(self, order, **kwargs):
         super().__init__(**kwargs)
         self.order = order
+        self.sequence = None
 
     def setup(self):
         super().setup()
@@ -230,11 +242,12 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
 class FunctionGenerator(Generator):
     """Generates signals from a shape function.
 
-    Implementation of `Generator` for standard funcitons.
+    Implementation of `Generator` for standard functions.
 
     Arguments:
-        frequency (`float`): The frequecy of the signal, in Hz.
-        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
+        frequency (`float`): The frequency of the signal, in Hz.
+        repetitions (`float`, optional): The number of repetitions,
+            default `np.inf`.
         shape (`str`, optional): Function shape, default ``'sine'``. Currently
             available functions are
 
@@ -242,7 +255,8 @@ class FunctionGenerator(Generator):
                 - ``'sawtooth'``: `scipy.signal.sawtooth`
                 - ``'square'``: `scipy.signal.square`
 
-        phase_offset (`float`, optional): Phase offset of the signal in radians, default 0.
+        phase_offset (`float`, optional): Phase offset of the signal in radians,
+            default 0.
         shape_kwargs (`dict`): Keyword arguments for shape function.
     """
     _functions = {
@@ -254,11 +268,14 @@ class FunctionGenerator(Generator):
     def __init__(self, frequency, repetitions=np.inf,
                  shape='sine', phase_offset=0, shape_kwargs=None, **kwargs):
         super().__init__(**kwargs)
-        self.repetitions = repetitions  # Default to continious output
+        self.repetitions = repetitions  # Default to continuous output
         self.frequency = frequency
         self.shape = shape
         self.phase_offset = phase_offset
         self.shape_kwargs = {} if shape_kwargs is None else shape_kwargs
+        self._phase = None
+        self._phase_array = None
+        self._phase_per_frame = None
 
     def frame(self):
         if self.repetitions_done >= self.repetitions:
@@ -381,28 +398,31 @@ class NoiseGenerator(Generator):
 
     _call_methods = {
         'fft': _fft_noise,
-        'autoregressive': _ar_noise
+        'autoregressive': _ar_noise,
     }
 
     _setup_methods = {
         'fft': _fft_setup,
-        'autoregressive': _ar_setup
+        'autoregressive': _ar_setup,
     }
 
     _reset_methods = {
         'fft': _fft_reset,
-        'autoregressive': _ar_reset
+        'autoregressive': _ar_reset,
     }
 
     def frame(self):
+        # noinspection PyArgumentList
         return self._call_methods[self.method](self)
 
     def setup(self):
         super().setup()
+        # noinspection PyArgumentList
         self._setup_methods[self.method](self)
 
     def reset(self):
         super().reset()
+        # noinspection PyArgumentList
         self._reset_methods[self.method](self)
 
     @property

@@ -82,11 +82,11 @@ class QDistributor(Distributor):
 class HDFWriter(Distributor):
     """ Implements writing to an HDF 5 file.
 
-    Hiearchial Data Format (HDF) 5 is a format suitable for multidimentional
-    data. The format supports arbritrary metadata tags, and datasets can be
+    Hierarchical Data Format (HDF) 5 is a format suitable for multidimensional
+    data. The format supports arbitrary metadata tags, and datasets can be
     organized in a folder-like structure within a single file.
 
-    Fileaccess is restricted to a single writer to maintain file integrity.
+    File access is restricted to a single writer to maintain file integrity.
     A single writer can be be used to write data with multiple devices at the
     same time by using different datasets.
 
@@ -166,7 +166,7 @@ class HDFWriter(Distributor):
         """Starts the file writer.
 
         The file writer will be started in one of three modes with different
-        level of user controll.
+        level of user control.
 
         Mode: ``'auto'``
             The auto mode doc
@@ -331,7 +331,7 @@ class HDFWriter(Distributor):
             try:
                 dataset, head, _ = self._datasets[index]
             except (IndexError, TypeError):
-                # We will get an IndexError if index indicated a hogher number dataset than what already exists,
+                # We will get an IndexError if index indicated a higher number dataset than what already exists,
                 # but if we have a sparse creation of sets, e.g. set 0 is missing, but set 1 exists, we will get
                 # a type error since `None` is not iterable
                 dataset, head, _ = self._create_dataset(ndim=data.ndim, chunks=data.shape, index=index)
@@ -342,13 +342,13 @@ class HDFWriter(Distributor):
             if head[ax] + data.shape[idx] > dataset.shape[ax]:
                 dataset.resize(head[ax] + data.shape[idx], axis=ax)
 
-        # All indices exept the last ndim number are constant
+        # All indices except the last ndim number are constant
         idx_list = list(head[:-data.ndim])
         # The last indices should be sliced from head to head+data.shape
         idx_list.extend([slice(start, start + length) for start, length in zip(head[-data.ndim:], data.shape)])
         # The list must be converted to a tuple
         dataset[tuple(idx_list)] = data
-        # Uptade the head
+        # Update the head
         head[-1] += data.shape[-1]
 
     def step(self, **kwargs):
@@ -382,28 +382,27 @@ class HDFWriter(Distributor):
         if axis < len(head) - len(data_shape) and head[axis] >= dataset.shape[axis]:
             dataset.resize(head[axis] + 1, axis)
 
-        return
-        # Old implementation below
-        if isinstance(axis, bool):
-            # Leave the data dimentions intact, step along the next one
-            axis = -len(data_shape) - 1
-        if axis >= 0:
-            # We would like to always index from the rear since the dimentions align there
-            axis = axis - dataset.ndim
-
-        if -axis <= len(data_shape):
-            # Step along axis in data
-            # Reshaping as a consequence of this cannot be done here since we allow a new data shape
-            head[axis] += data_shape[axis]
-        else:
-            # Step along axis not existing in data, resize if we need to
-            head[axis] += 1
-            if head[axis] >= dataset.shape[axis]:
-                dataset.resize(head[axis] + 1, dataset.ndim + axis)
-        # Reset axes after step axis
-        # Strange indexing needed for when axis=-1, since there is no -0 equivalent
-        head[head.size + axis + 1:] = 0
-        # self.head = head
+        # # Old implementation below
+        # if isinstance(axis, bool):
+        #     # Leave the data dimensions intact, step along the next one
+        #     axis = -len(data_shape) - 1
+        # if axis >= 0:
+        #     # We would like to always index from the rear since the dimensions align there
+        #     axis = axis - dataset.ndim
+        #
+        # if -axis <= len(data_shape):
+        #     # Step along axis in data
+        #     # Reshaping as a consequence of this cannot be done here since we allow a new data shape
+        #     head[axis] += data_shape[axis]
+        # else:
+        #     # Step along axis not existing in data, resize if we need to
+        #     head[axis] += 1
+        #     if head[axis] >= dataset.shape[axis]:
+        #         dataset.resize(head[axis] + 1, dataset.ndim + axis)
+        # # Reset axes after step axis
+        # # Strange indexing needed for when axis=-1, since there is no -0 equivalent
+        # head[head.size + axis + 1:] = 0
+        # # self.head = head
 
     def _write_target(self):
         def handle(item):
