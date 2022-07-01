@@ -1,5 +1,6 @@
-from . import _core
 import sounddevice as sd
+
+from . import _core
 
 
 class _StreamedInterface(_core.SamplerateDecider):

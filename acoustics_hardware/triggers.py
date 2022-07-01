@@ -22,7 +22,7 @@ class Trigger:
         false_action (callable or list of callables): The actions that will be
             called each time the test evaluates to ``False``.
         auto_deactivate (`bool`): Sets if the trigger deactivates itself when
-            the test is ``True``. Useful to only trigger once, dafault ``True``.
+            the test is ``True``. Useful to only trigger once, default ``True``.
         use_calibrations (`bool`): Sets if calibration values from the Device
             should be used for the test, default ``True``.
     Attributes:

@@ -7,7 +7,6 @@ dependencies:
   - flake8
   - pydocstyle
   - pip
-  - snakeviz
   - pip:
     - sphinx_rtd_theme
     - -e .

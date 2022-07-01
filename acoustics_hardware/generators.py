@@ -1,8 +1,9 @@
-import numpy as np
-from numpy.fft import rfft as fft, irfft as ifft
-import scipy.signal
 import queue
-import warnings
+
+import numpy as np
+import scipy.signal
+from numpy.fft import irfft as ifft, rfft as fft
+
 from . import utils
 
 

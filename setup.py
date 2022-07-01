@@ -1,7 +1,7 @@
-from setuptools import setup
-import sys
 import os.path
+import sys
 
+from setuptools import setup
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'acoustics_hardware'))
 from _version import version_manager  # We cannot import the _version module, but we can import from it.

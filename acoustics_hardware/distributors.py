@@ -1,10 +1,11 @@
+import multiprocessing
 import os.path
+import queue
+import threading
+import warnings
+
 import h5py
 import numpy as np
-import multiprocessing
-import threading
-import queue
-import warnings
 
 from . import utils
 

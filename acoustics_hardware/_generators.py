@@ -1,5 +1,6 @@
-from . import _core, signal_tools
 import numpy as np
+
+from . import _core, signal_tools
 
 
 class _Generator(_core.SamplerateFollower):

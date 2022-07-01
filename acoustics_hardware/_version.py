@@ -1,6 +1,6 @@
-import subprocess
-import os.path
 import contextlib
+import os.path
+import subprocess
 
 
 def git_version():
@@ -56,7 +56,7 @@ def version_manager():
 
 @contextlib.contextmanager
 def version_manager():
-    """Context manager for hardcoding the version while packaging.
+    """Context manager for hard-coding the version while packaging.
 
     Use this context managed around the `setup()` call while packaging to replace
     the dynamic git-tag versioning with a hardcoded version number.

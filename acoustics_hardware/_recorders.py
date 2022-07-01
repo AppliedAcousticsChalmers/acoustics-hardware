@@ -1,5 +1,6 @@
-from . import _core
 import numpy as np
+
+from . import _core
 
 
 class _Recorder(_core.SamplerateFollower):
