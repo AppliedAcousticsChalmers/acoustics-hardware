@@ -1,9 +1,14 @@
-name: acoustics_hardware_dev
+name: acoustics-hardware-dev
 dependencies:
-  - jupyter
   - numpy
+  - scipy
+  - jupyter
+  - sphinx
+  - flake8
+  - pydocstyle
   - pip
   - snakeviz
   - pip:
+    - sphinx_rtd_theme
     - -e .
     - ipympl # for interactive plots in jupyter with matplotlib

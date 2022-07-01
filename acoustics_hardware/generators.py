@@ -1,9 +1,8 @@
-import queue
-
 import numpy as np
-from numpy.fft import irfft as ifft, rfft as fft
-from scipy.signal import max_len_seq, waveforms
-
+from numpy.fft import rfft as fft, irfft as ifft
+import scipy.signal
+import queue
+import warnings
 from . import utils
 
 
@@ -235,7 +234,7 @@ class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
 
     def setup(self):
         super().setup()
-        self.sequence, state = max_len_seq(self.order)
+        self.sequence, state = scipy.signal.max_len_seq(self.order)
         self.signal = (1 - 2 * self.sequence).astype('float64')
 
 
@@ -260,9 +259,9 @@ class FunctionGenerator(Generator):
         shape_kwargs (`dict`): Keyword arguments for shape function.
     """
     _functions = {
-        'sin': waveforms.sin,
-        'saw': waveforms.sawtooth,
-        'squ': waveforms.square
+        'sin': np.sin,
+        'saw': scipy.signal.sawtooth,
+        'squ': scipy.signal.square
     }
 
     def __init__(self, frequency, repetitions=np.inf,
