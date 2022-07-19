@@ -78,7 +78,7 @@ class SignalGenerator(_Generator):
         if self._sample_index != 0 and self._repetitions_done != 0:
             raise RuntimeError('Cannot use method `once` on generator which is running in a streamed pipeline!')
         framesize = self.repetitions * self.signal.shape[-1]
-        frame = self.input(framesize)
+        frame = self.push(framesize)
         self._sample_index = self._repetitions_done = 0
         return frame
         # frame = np.tile(self.signal, self.repetitions)

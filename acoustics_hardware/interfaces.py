@@ -151,12 +151,12 @@ class AudioInterface(_StreamedInterface):
 
         def process_input(frame):
             # Take the frame read from hardware and push it downstream in the pipeline.
-            self._output.input(frame.T[inputs])
+            self._downstream.push(frame.T[inputs])
 
         def process_output(buffer):
             # Get a frame from upstream in the pipeline and write it to the buffer.
             try:
-                buffer[:, outputs] = self._input.output(buffer.shape[0]).T
+                buffer[:, outputs] = self._upstream.request(buffer.shape[0]).T
                 buffer[:, silent_ch] = 0
             except _core.PipelineStop:
                 buffer[:] = 0
@@ -464,12 +464,12 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
             self.stop()
             raise
         self._samples_read += number_of_samples
-        self._output.input(self._databuffer.copy())
+        self._downstream.push(self._databuffer.copy())
         return 0
 
     def _write_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
         try:
-            frame = self._input.output(number_of_samples).squeeze()
+            frame = self._upstream.request(number_of_samples).squeeze()
         except _core.PipelineStop:
             frame = np.zeros((len(self.output_channels), number_of_samples))
             self._write(frame)
@@ -621,11 +621,11 @@ class DummyInterface(_StreamedInterface):
         while self._running.is_set() and frames < 200:
             frames += 1
             try:
-                frame = self._input.output(self.framesize)
+                frame = self._upstream.request(self.framesize)
             except _core.PipelineStop:
                 self._running.clear()
                 break
-            self._output.input(frame)
+            self._downstream.push(frame)
 
     def stop(self):
         self._running.clear()
