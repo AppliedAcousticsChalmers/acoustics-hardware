@@ -3,6 +3,7 @@ import numpy as np
 import sounddevice as sd
 import time
 import functools
+import warnings
 
 try:
     import nidaqmx
@@ -317,7 +318,6 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
         name_list = [dev.name for dev in system.devices]
         return name_list
 
-
     def __init__(self, name=None, framesize=None, buffer_n_frames=25, **kwargs):
         self.name = name or self.list_interfaces()[0]
         self._device = nidaqmx.system.Device(self.name)
@@ -335,19 +335,78 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
         self.framesize = framesize
         self.buffer_n_frames = buffer_n_frames
 
-        if self.samplerate is None:
-            num_in = self.max_inputs
-            num_out = self.max_outputs
-            if num_in and num_out:
+    @property
+    def samplerate(self):
+        return self._samplerate
+
+    @samplerate.setter
+    def samplerate(self, val):
+        has_in = self.max_inputs > 0
+        has_out = self.max_outputs > 0
+
+        if val is None:
+            if has_in and has_out:
                 fs_in = self._device.ai_max_multi_chan_rate
                 fs_out = self._device.ao_max_rate
-                self.samplerate = (fs_out, fs_in)
-            elif num_in:
-                self.samplerate = self._device.ai_max_multi_chan_rate
-            elif num_out:
-                self.samplerate = self._device.ao_max_rate
+            elif has_in:
+                fs_in = fs_out = self._device.ai_max_multi_chan_rate
+            elif has_out:
+                fs_in = fs_out = self._device.ao_max_rate
             else:
                 raise ValueError(f'National Instruments interface {self.name} seems to have neither inputs nor outputs')
+        else:
+            try:
+                fs_out, fs_in = val
+            except TypeError:
+                fs_out = fs_in = val
+
+        if has_in:
+            task = nidaqmx.Task()
+            task.ai_channels.add_ai_voltage_chan(self._device.ai_physical_chans[0].name)
+            task.timing.cfg_samp_clk_timing(rate=fs_in)
+            if not fs_in == task.timing.samp_clk_rate:
+                warnings.warn(f'Target input samplerate {fs_in} not available on device, using {task.timing.samp_clk_rate}', stacklevel=2)
+                fs_in = task.timing.samp_clk_rate
+            task.close()
+
+        if has_out:
+            task = nidaqmx.Task()
+            task.ao_channels.add_ao_voltage_chan(self._device.ao_physical_chans[0].name)
+            task.timing.cfg_samp_clk_timing(rate=fs_out)
+            if not fs_out == task.timing.samp_clk_rate:
+                warnings.warn(f'Target output samplerate {fs_out} not available on device, using {task.timing.samp_clk_rate}', stacklevel=3)
+                fs_out = task.timing.samp_clk_rate
+            task.close()
+
+        if fs_out == fs_in:
+            self._samplerate = fs_in
+        else:
+            self._samplerate = (fs_out, fs_in)
+
+    @property
+    def framesize(self):
+        return self._framesize
+
+    @framesize.setter
+    def framesize(self, val):
+        if val is None:
+            fs = self.samplerate
+            try:
+                fs_out, fs_in = fs
+            except TypeError:
+                fs_in = fs_out = fs
+            N_in = fs_in // 50
+            N_out = fs_out // 50
+        else:
+            try:
+                N_out, N_in = val
+            except TypeError:
+                N_out = N_in = val
+
+        if N_out == N_in:
+            self._framesize = N_out
+        else:
+            self._framesize = (N_out, N_in)
 
     def reset(self, **kwargs):
         super().reset(**kwargs)
@@ -407,6 +466,7 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
                 self._databuffer = np.empty((self._input_task.in_stream.num_chans, framesize_downstream))
                 self._read = nidaqmx.stream_readers.AnalogMultiChannelReader(self._input_task.in_stream).read_many_sample
                 self._samples_read = 0
+                self._input_task.in_stream.input_buf_size = framesize_downstream * self.buffer_n_frames
                 self._input_task.register_every_n_samples_acquired_into_buffer_event(framesize_downstream, self._read_callback)
 
         if len(self.output_channels):
@@ -420,7 +480,8 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
                 self._write = nidaqmx.stream_writers.AnalogMultiChannelWriter(self._output_task.out_stream).write_many_sample
                 self._output_task.out_stream.regen_mode = nidaqmx.constants.RegenerationMode.DONT_ALLOW_REGENERATION
                 self._samples_written = 0
-                self._write_callback(None, None, self.buffer_n_frames * framesize_downstream, None)
+                self._output_task.out_stream.output_buf_size = framesize_upstream * self.buffer_n_frames
+                self._write_callback(None, None, self.buffer_n_frames * framesize_upstream, None)
                 self._output_task.register_every_n_samples_transferred_from_buffer_event(framesize_upstream, self._write_callback)
 
         if len(self.output_channels) and len(self.input_channels):
@@ -448,8 +509,9 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
                 pass
 
         if len(self.input_channels):
-            while self._samples_read < self._samples_written:
-                time.sleep(self.framesize / self.samplerate)
+            if len(self.output_channels):
+                while self._samples_read < self._samples_written:
+                    time.sleep(self._input_task.in_stream.sleep_time)
             try:
                 self._input_task.stop()
                 self._input_task.wait_until_done(timeout=10)
