@@ -22,6 +22,24 @@ class LastFrame(Frame):
         self.valid_samples = valid_samples
 
 
+class TriggerFrame(Frame):
+    def __init__(self, frame, indices):
+        self.frame = frame
+        self.indices = indices
+
+
+class GateOpenFrame(Frame):
+    ...
+
+
+class GateCloseFrame(Frame):
+    ...
+
+
+class GateOpenCloseFrame(GateOpenFrame, GateCloseFrame):
+    ...
+
+
 class Pipeline:
     def __init__(self, *nodes):
         self.nodes = nodes
