@@ -6,22 +6,6 @@ class Request(Packet):
     ...
 
 
-class Data(Packet):
-    ...
-
-
-class Signal(Packet):
-    ...
-
-
-class SetupSignal(Signal):
-    ...
-
-
-class ResetSignal(Signal):
-    ...
-
-
 class FrameRequest(Request):
     def __init__(self, framesize):
         self.framesize = framesize
@@ -31,23 +15,77 @@ class Frame(Packet):
     def __init__(self, frame):
         self.frame = frame
 
+
 class LastFrame(Frame):
     def __init__(self, frame, valid_samples):
         self.frame = frame
         self.valid_samples = valid_samples
 
 
+class Pipeline:
+    def __init__(self, *nodes):
+        self.nodes = nodes
+
+    def __repr__(self):
+        return str([node.__class__.__name__ for node in self])
+
+    def __iter__(self):
+        return iter(self.nodes)
+
+    @property
+    def samplerate_decider(self):
+        for node in self:
+            if isinstance(node, SamplerateDecider):
+                return node
+
+    def run(self):
+        self.samplerate_decider.run()
+
+    def setup(self):
+        for node in self:
+            node.setup()
+
+    def reset(self):
+        for node in self:
+            node.reset()
+
+    def __or__(self, other):
+        if isinstance(other, Pipeline):
+            self.nodes[-1]._downstream = other.nodes[0]
+            other.nodes[0]._upstream = self.nodes[-1]
+            return Pipeline(*self.nodes, *other.nodes)
+        if isinstance(other, Node):
+            self.nodes[-1]._downstream = other
+            other._upstream = self.nodes[-1]
+            return Pipeline(*self.nodes, other)
+        return NotImplemented
+
+    def __ror__(self, other):
+        if isinstance(other, Pipeline):
+            self.nodes[0]._upstream = other.nodes[-1]
+            other.nodes[-1]._downstream = self.nodes[0]
+            return Pipeline(*other.nodes, *self.nodes)
+        if isinstance(other, Node):
+            self.nodes[0]._upstream = other
+            other._downstream = self.nodes[0]
+            return Pipeline(other, *self.nodes)
+        return NotImplemented
+
+
 class Node:
     """Generic pipeline Node."""
 
-    def __init__(self, upstream=None, downstream=None):
-        self._is_ready = True
+    def __init__(self):
+        self._is_ready = False
         self.__upstream = None
         self.__downstream = None
-        if upstream is not None:
-            self.insert_upstream(upstream)
-        if downstream is not None:
-            self.insert_downstream(downstream)
+
+    def __or__(self, other):
+        if isinstance(other, Node):
+            self._downstream = other
+            other._upstream = self
+            return Pipeline(self, other)
+        return NotImplemented
 
     def setup(self):
         """Run setup for this Node."""
@@ -91,22 +129,6 @@ class Node:
         """Code to run when the downstream is changed."""
         pass
 
-    def insert_upstream(self, insert):
-        """Insert a node between this node and it's upstream."""
-        if isinstance(self._upstream, Node):
-            self._upstream._downstream = insert
-        insert._upstream = self._upstream
-        insert._downstream = self
-        self._upstream = insert
-
-    def insert_downstream(self, insert):
-        """Insert a node between this node and it's downstream."""
-        if isinstance(self._downstream, Node):
-            self._downstream._upstream = insert
-        insert._downstream = self._downstream
-        insert._upstream = self
-        self._downstream = insert
-
     def push(self, packet):
         """Give a packet of data as the input to this node.
 
@@ -114,11 +136,6 @@ class Node:
         """
         if isinstance(packet, Frame):
             packet = self.process(packet)
-        elif isinstance(packet, Signal):
-            if isinstance(packet, SetupSignal):
-                self.setup()
-            if isinstance(packet, ResetSignal):
-                self.reset()
 
         if packet is None:
             return
@@ -145,12 +162,6 @@ class Node:
                 # Either there's no upstream node, or it could not handle the request.
                 # Process this request here, then return the generated frame.
                 return self.process(packet)
-
-        elif isinstance(packet, Signal):
-            if isinstance(packet, SetupSignal):
-                self.setup()
-            if isinstance(packet, ResetSignal):
-                self.reset()
 
 
 class SamplerateDecider(Node):
@@ -229,19 +240,19 @@ class SamplerateFollower(Node):
             return self._samplerate_direction
 
         if direction == 'both':
-            self._get_samplerate_direction('upstream') or self._get_samplerate_direction('downstream')
+            self._samplerate_direction = self._get_samplerate_direction('upstream') or self._get_samplerate_direction('downstream')
             return self._samplerate_direction
 
         if direction == 'upstream':
             if isinstance(self._upstream, SamplerateDecider):
                 self._set_samplerate_direction('upstream')
-                return True
+                return 'upstream'
             elif isinstance(self._upstream, SamplerateFollower):
                 return self._upstream._get_samplerate_direction('upstream')
         elif direction == 'downstream':
             if isinstance(self._downstream, SamplerateDecider):
                 self._set_samplerate_direction('downstream')
-                return True
+                return 'downstream'
             elif isinstance(self._downstream, SamplerateFollower):
                 return self._downstream._get_samplerate_direction('downstream')
         else:

@@ -391,7 +391,6 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
             voltage_range=(min(self._device.ao_voltage_rngs), max(self._device.ao_voltage_rngs))
         )
         super().__init__(**kwargs)
-        self._is_ready = False  # This class needs a proper setup!
         self.framesize = framesize
         self.buffer_n_frames = buffer_n_frames
 
@@ -551,8 +550,6 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
     def run(self):
         if not self._is_ready:
             self.setup()
-            self._upstream.request(_core.SetupSignal())
-            self._downstream.push(_core.SetupSignal())
 
         if len(self.input_channels):
             self._input_task.start()
