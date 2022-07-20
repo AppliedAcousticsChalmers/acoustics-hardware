@@ -110,6 +110,19 @@ class _StreamedInterface(_core.SamplerateDecider):
         self.input_channels = self._input_channels(input_channels)
         self.output_channels = self._output_channels(output_channels)
 
+    def process(self, packet):
+        frame = framesize = None
+        if isinstance(packet, _core.Frame):
+            frame = packet.frame
+        elif isinstance(packet, _core.FrameRequest):
+            framesize = packet.framesize
+        elif not isinstance(packet, _core.Packet):
+            if np.ndim(packet) == 0:
+                framesize = packet
+            else:
+                frame = packet
+        return _core.Frame(self.playrec(frame=frame, framesize=framesize))
+
 
 class AudioInterface(_StreamedInterface):
     @classmethod
@@ -152,15 +165,15 @@ class AudioInterface(_StreamedInterface):
 
         def process_input(frame):
             # Take the frame read from hardware and push it downstream in the pipeline.
-            self._downstream.push(frame.T[inputs])
+            frame = _core.Frame(frame.T[inputs])
+            self._downstream.push(frame)
 
         def process_output(buffer):
             # Get a frame from upstream in the pipeline and write it to the buffer.
-            try:
-                buffer[:, outputs] = self._upstream.request(buffer.shape[0]).T
-                buffer[:, silent_ch] = 0
-            except _core.PipelineStop:
-                buffer[:] = 0
+            frame = self._upstream.request(_core.FrameRequest(buffer.shape[0]))
+            buffer[:, outputs] = frame.frame.T
+            buffer[:, silent_ch] = 0
+            if isinstance(frame, _core.LastFrame):
                 raise sd.CallbackStop()
 
         if num_input_ch and num_output_ch:
@@ -200,7 +213,7 @@ class AudioInterface(_StreamedInterface):
     def stop(self):
         self._stream.stop()
 
-    def process(self, frame=None, framesize=None):
+    def playrec(self, frame=None, framesize=None):
         outputs = [ch.channel + 1 for ch in self.output_channels]
         inputs = [ch.channel + 1 for ch in self.input_channels]
 
@@ -490,7 +503,9 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
 
     def run(self):
         if not self._is_ready:
-            self.setup(pipeline=True)
+            self.setup()
+            self._upstream.request(_core.SetupSignal())
+            self._downstream.push(_core.SetupSignal())
 
         if len(self.input_channels):
             self._input_task.start()
@@ -526,25 +541,23 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
             self.stop()
             raise
         self._samples_read += number_of_samples
-        self._downstream.push(self._databuffer.copy())
+        self._downstream.push(_core.Frame(self._databuffer.copy()))
         return 0
 
     def _write_callback(self, task_handle, every_n_samples_event_type, number_of_samples, callback_data):
-        try:
-            frame = self._upstream.request(number_of_samples).squeeze()
-        except _core.PipelineStop:
-            frame = np.zeros((len(self.output_channels), number_of_samples))
-            self._write(frame)
+        frame = self._upstream.request(_core.FrameRequest(number_of_samples))
+        self._write(frame.frame)
+        self._samples_written += number_of_samples
+        if isinstance(frame, _core.LastFrame):
+            self._samples_written -= number_of_samples
+            self._samples_written += frame.valid_samples
+            frame = self._write(np.zeros((len(self.output_channels), number_of_samples)))
             while self._output_task.out_stream.total_samp_per_chan_generated < self._samples_written:
                 time.sleep(self._output_task.out_stream.sleep_time)
             self.stop()
-            return 0
-
-        self._write(frame)
-        self._samples_written += number_of_samples
         return 0
 
-    def process(self, frame=None, framesize=None):
+    def playrec(self, frame=None, framesize=None):
         if frame is not None:
             padded_frame = signal_tools.pad_signals(frame, post_pad=1)
         if framesize is None and len(self.input_channels):
@@ -667,9 +680,11 @@ class CompactDaqmxMultimodule(NationalInstrumentsDaqmx):
 
 
 class DummyInterface(_StreamedInterface):
-    def __init__(self, framesize=None, **kwargs):
+    def __init__(self, framesize=None, maxframes=np.inf, realtime=False, **kwargs):
         super().__init__(**kwargs)
         self.framesize = framesize
+        self.maxframes = maxframes
+        self.realtime = realtime
 
     def run(self):
         import threading
@@ -680,14 +695,15 @@ class DummyInterface(_StreamedInterface):
     def _passthrough_target(self):
         self._running.set()
         frames = 0
-        while self._running.is_set() and frames < 200:
+        while self._running.is_set() and frames < self.maxframes:
             frames += 1
-            try:
-                frame = self._upstream.request(self.framesize)
-            except _core.PipelineStop:
+            frame = self._upstream.request(self.framesize)
+            if self.realtime:
+                time.sleep(self.framesize / self.samplerate)
+            self._downstream.push(frame)
+            if isinstance(frame, _core.LastFrame):
                 self._running.clear()
                 break
-            self._downstream.push(frame)
 
     def stop(self):
         self._running.clear()

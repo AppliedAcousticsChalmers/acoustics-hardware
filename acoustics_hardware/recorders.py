@@ -21,7 +21,8 @@ class InternalRecorder(_Recorder):
         self._storage = []
 
     def process(self, frame):
-        self._storage.append(frame)
+        if isinstance(frame, _core.Frame):
+            self._storage.append(frame.frame)
         return frame
 
     @property
@@ -61,13 +62,14 @@ class ZArrRecorder(_Recorder):
     def process(self, frame):
         if not self._is_ready:
             self.setup()
-        if self.threaded:
-            self._q.put(frame)
-        else:
-            try:
-                self.writer.send(frame)
-            except StopIteration:
-                pass
+        if isinstance(frame, _core.Frame):
+            if self.threaded:
+                self._q.put(frame.frame)
+            else:
+                try:
+                    self.writer.send(frame.frame)
+                except StopIteration:
+                    pass
         return frame
 
     def initizlize_writer(self):
@@ -119,9 +121,6 @@ class ZArrRecorder(_Recorder):
                     samps_since_last_status = 0
         # Write any potential data left in the buffer. This might not be chunk-aligned.
         storage.append(buffer[:, :write_idx], axis=1)
-
-
-
         self._is_ready = False
 
     def threaded_writer(self):

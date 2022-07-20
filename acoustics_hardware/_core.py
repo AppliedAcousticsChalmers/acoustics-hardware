@@ -1,5 +1,40 @@
-class PipelineStop(Exception):
-    """Raised internally when it is time to stop the pipeline."""
+class Packet:
+    ...
+
+
+class Request(Packet):
+    ...
+
+
+class Data(Packet):
+    ...
+
+
+class Signal(Packet):
+    ...
+
+
+class SetupSignal(Signal):
+    ...
+
+
+class ResetSignal(Signal):
+    ...
+
+
+class FrameRequest(Request):
+    def __init__(self, framesize):
+        self.framesize = framesize
+
+
+class Frame(Packet):
+    def __init__(self, frame):
+        self.frame = frame
+
+class LastFrame(Frame):
+    def __init__(self, frame, valid_samples):
+        self.frame = frame
+        self.valid_samples = valid_samples
 
 
 class Node:
@@ -14,31 +49,13 @@ class Node:
         if downstream is not None:
             self.insert_downstream(downstream)
 
-    def setup(self, pipeline=None):
-        """Run setup for this Node.
-
-        If the `pipeline` input is True, the entire pipeline will be setup.
-        """
+    def setup(self):
+        """Run setup for this Node."""
         self._is_ready = True
-        if pipeline in (None, False):
-            return
-        if isinstance(self._upstream, Node) and pipeline in ('upstream', 'both', True):
-            self._upstream.setup(pipeline='upstream')
-        if isinstance(self._downstream, Node) and pipeline in ('downstream', 'both', True):
-            self._downstream.setup(pipeline='downsteram')
 
-    def reset(self, pipeline=None):
-        """Reset this Node.
-
-        If the `pipeline` input is True, the entire pipeline will be reset.
-        """
+    def reset(self):
+        """Reset this Node."""
         self._is_ready = False
-        if pipeline in (None, False):
-            return
-        if isinstance(self._upstream, Node) and pipeline in ('upstream', 'both', True):
-            self._upstream.reset(pipeline='upstream')
-        if isinstance(self._downstream, Node) and pipeline in ('downstream', 'both', True):
-            self._downstream.reset(pipeline='downstream')
 
     def process(self, frame):
         """Process one frame of data."""
@@ -90,33 +107,50 @@ class Node:
         insert._upstream = self
         self._downstream = insert
 
-    def push(self, frame):
-        """Give a frame of data as the input to this node.
+    def push(self, packet):
+        """Give a packet of data as the input to this node.
 
         Processes a frame and passes it along down the pipeline.
         """
-        frame = self.process(frame)
+        if isinstance(packet, Frame):
+            packet = self.process(packet)
+        elif isinstance(packet, Signal):
+            if isinstance(packet, SetupSignal):
+                self.setup()
+            if isinstance(packet, ResetSignal):
+                self.reset()
+
+        if packet is None:
+            return
 
         if self._downstream is not None:
             # We should push the frame down the pipeline, and return the final result.
-            return self._downstream.push(frame)
+            return self._downstream.push(packet)
         else:
             # This is the end of the pipeline, so return the frame.
-            return frame
+            return packet
 
-    def request(self, framesize):
+    def request(self, packet):
         """Request one frame of output from this object.
 
         Requests a frame from the upstream or this node, process it,
         then return the frame.
         """
         if self._upstream is not None:
-            # There's an upstream node, ask it for a frame of the correct size, process it, and return down the pipeline
-            frame = self._upstream.request(framesize)
-            return self.process(frame=frame)
-        else:
-            # There's no upstream node, so self has to be a generator. Give the framesize to the process function, then return down the pipeline.
-            return self.process(framesize=framesize)
+            # There's an upstream node, ask it to handle the packet first.
+            packet = self._upstream.request(packet)
+
+        if isinstance(packet, Request):
+            if isinstance(packet, FrameRequest):
+                # Either there's no upstream node, or it could not handle the request.
+                # Process this request here, then return the generated frame.
+                return self.process(packet)
+
+        elif isinstance(packet, Signal):
+            if isinstance(packet, SetupSignal):
+                self.setup()
+            if isinstance(packet, ResetSignal):
+                self.reset()
 
 
 class SamplerateDecider(Node):

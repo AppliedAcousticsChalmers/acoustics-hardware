@@ -4,8 +4,18 @@ import scipy.signal
 
 
 class _Generator(_core.SamplerateFollower):
-    def process(self, frame):
-        return np.atleast_2d(frame)
+    def process(self, packet):
+        if not isinstance(packet, _core.FrameRequest):
+            return packet
+        frame = self.generate(packet.framesize)
+        if isinstance(frame, _core.Frame):
+            frame.frame = np.atleast_2d(frame.frame)
+        elif not isinstance(frame, _core.Packet):
+            frame = _core.Frame(np.atleast_2d(frame))
+        return frame
+
+    def generate(self, framesize):
+        return np.zeros(framesize)
 
 
 class SignalGenerator(_Generator):
@@ -51,9 +61,9 @@ class SignalGenerator(_Generator):
         signal = signal_tools.pad_signals(signal, pre_pad=self.pre_pad, post_pad=self.post_pad, samplerate=self.samplerate)
         self._signal = signal * self.amplitude
 
-    def process(self, framesize):
+    def generate(self, framesize):
         if self._repetitions_done >= self.repetitions:
-            raise _core.PipelineStop()
+            return _core.LastFrame(np.zeros(framesize), 0)
 
         start_idx = self._sample_index
         stop_idx = self._sample_index + framesize
@@ -71,18 +81,19 @@ class SignalGenerator(_Generator):
         if self._repetitions_done >= self.repetitions:
             if self._sample_index > 0:
                 frame[..., -self._sample_index:] = 0
-
-        return super().process(frame)
+            frame = _core.LastFrame(frame, framesize - self._sample_index)
+        else:
+            frame = _core.Frame(frame)
+        return frame
 
     def once(self):
         if self._sample_index != 0 and self._repetitions_done != 0:
             raise RuntimeError('Cannot use method `once` on generator which is running in a streamed pipeline!')
         framesize = self.repetitions * self.signal.shape[-1]
-        frame = self.push(framesize)
+
+        frame = self.request(_core.FrameRequest(framesize))
         self._sample_index = self._repetitions_done = 0
-        return frame
-        # frame = np.tile(self.signal, self.repetitions)
-        # self.super().process(frame)
+        return self.push(frame)
 
 
 class SweepGenerator(SignalGenerator):
@@ -220,9 +231,9 @@ class ToneGenerator(_Generator):
         super().reset(**kwargs)
         self._phase = 0
 
-    def process(self, framesize):
+    def generate(self, framesize):
         if self._phase >= self.periods * 2 * np.pi:
-            raise _core.PipelineStop()
+            return _core.LastFrame(np.zeros(framesize), 0)
 
         phase = np.arange(framesize) * (2 * np.pi * self.frequency / self.samplerate)
         signal = self._function(self._phase + self.phase_offset + phase, **self.shape_kwargs)
@@ -231,7 +242,10 @@ class ToneGenerator(_Generator):
             phase_to_mute = self._phase - self.periods * 2 * np.pi
             samples_to_mute = np.math.floor(phase_to_mute / (2 * np.pi * self.frequency) * self.samplerate)
             signal[-samples_to_mute:] = 0
-        return signal
+            frame = _core.LastFrame(signal, framesize - samples_to_mute)
+        else:
+            frame = _core.Frame(signal)
+        return frame
 
     @property
     def shape(self):
