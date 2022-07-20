@@ -124,6 +124,53 @@ class _StreamedInterface(_core.SamplerateDecider):
         return _core.Frame(self.playrec(frame=frame, framesize=framesize))
 
 
+class DummyInterface(_StreamedInterface):
+    def __init__(self, framesize=None, maxframes=np.inf, realtime=False, threaded=True, **kwargs):
+        super().__init__(**kwargs)
+        self.framesize = framesize
+        self.maxframes = maxframes
+        self.realtime = realtime
+        self.threaded = threaded
+
+    def run(self):
+        if self.threaded:
+            import threading
+            self._running = threading.Event()
+            self._thread = threading.Thread(target=self._passthrough_target)
+            self._thread.start()
+        else:
+            frames = 0
+            while frames < self.maxframes:
+                frames += 1
+                frame = self._upstream.request(_core.FrameRequest(self.framesize))
+                if self.realtime:
+                    time.sleep(self.framesize / self.samplerate)
+                self._downstream.push(frame)
+                if isinstance(frame, _core.LastFrame):
+                    break
+
+    def _passthrough_target(self):
+        self._running.set()
+        frames = 0
+        while self._running.is_set() and frames < self.maxframes:
+            frames += 1
+            frame = self._upstream.request(self.framesize)
+            if self.realtime:
+                time.sleep(self.framesize / self.samplerate)
+            self._downstream.push(frame)
+            if isinstance(frame, _core.LastFrame):
+                self._running.clear()
+                break
+
+    def playrec(self, frame=None, framesize=None):
+        if frame is not None:
+            return frame
+        return np.zeros((1, framesize))
+
+    def stop(self):
+        self._running.clear()
+
+
 class AudioInterface(_StreamedInterface):
     @classmethod
     def list_interfaces(cls):
@@ -677,33 +724,3 @@ class CompactDaqmxMultimodule(NationalInstrumentsDaqmx):
             module.reset_device()
         for module in self.output_modules:
             module.reset_device()
-
-
-class DummyInterface(_StreamedInterface):
-    def __init__(self, framesize=None, maxframes=np.inf, realtime=False, **kwargs):
-        super().__init__(**kwargs)
-        self.framesize = framesize
-        self.maxframes = maxframes
-        self.realtime = realtime
-
-    def run(self):
-        import threading
-        self._running = threading.Event()
-        self._thread = threading.Thread(target=self._passthrough_target)
-        self._thread.start()
-
-    def _passthrough_target(self):
-        self._running.set()
-        frames = 0
-        while self._running.is_set() and frames < self.maxframes:
-            frames += 1
-            frame = self._upstream.request(self.framesize)
-            if self.realtime:
-                time.sleep(self.framesize / self.samplerate)
-            self._downstream.push(frame)
-            if isinstance(frame, _core.LastFrame):
-                self._running.clear()
-                break
-
-    def stop(self):
-        self._running.clear()
