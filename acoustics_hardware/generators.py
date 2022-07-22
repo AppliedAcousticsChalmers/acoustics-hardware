@@ -1,448 +1,295 @@
+from . import _core, signal_tools
 import numpy as np
-from numpy.fft import rfft as fft, irfft as ifft
 import scipy.signal
-import queue
-import warnings
-from . import utils
 
 
-class Generator:
-    """Base class for generator implementations.
+class _Generator(_core.SamplerateFollower):
+    def process(self, packet):
+        if not isinstance(packet, _core.FrameRequest):
+            return packet
+        frame = self.generate(packet.framesize)
+        if isinstance(frame, _core.Frame):
+            frame.frame = np.atleast_2d(frame.frame)
+        elif not isinstance(frame, _core.Packet):
+            frame = _core.Frame(np.atleast_2d(frame))
+        return frame
 
-    A `Generator` is an object that creates data for output channels in a
-    Device. Refer to specific generators for more details.
+    def generate(self, framesize):
+        return np.zeros(framesize)
 
-    Attributes:
-        amplitude (`float`): The amplitude scale of the generator.
-    """
-    def __init__(self, device=None, amplitude=1, **kwargs):
-        self.device = device
+
+class SignalGenerator(_Generator):
+    def __init__(
+        self, signal=None, repetitions=1,
+        amplitude=1,
+        fade_in=None, fade_out=None,
+        pre_pad=None, post_pad=None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
         self.amplitude = amplitude
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+        self.fade_in = fade_in
+        self.fade_out = fade_out
+        self.pre_pad = pre_pad
+        self.post_pad = post_pad
 
-    def __call__(self):
-        """Manages frame creation"""
-        return self.amplitude * np.atleast_2d(self.frame())
+        if signal is not None:
+            self.signal = signal
 
-    def frame(self):
-        """Generates a frame of output.
-
-        The generated frame must match the device framesize.
-        If the generator creates multiple channels, it should have the shape
-        ``(n_ch, framesize)``, otherwise 1d arrays are sufficient.
-
-        Returns:
-            `numpy.ndarray`: Generated frame.
-        """
-        raise NotImplementedError('Required method `frame` is not implemented in {}'.format(self.__class__.__name__))
-
-    def reset(self):
-        """Resets the generator."""
-        pass
-
-    def setup(self):
-        """Configures the generator state."""
-        pass
-
-    @property
-    def device(self):
-        try:
-            return self._device
-        except AttributeError:
-            return None
-
-    @device.setter
-    def device(self, dev):
-        if self.device is not None:
-            # Unregister from the previous device
-            if self.device.initialized:
-                self.reset()
-            self.device._Device__generators.remove(self)
-        self._device = dev
-        if self.device is not None:
-            # Register to the new device
-            self.device._Device__generators.append(self)
-            if self.device.initialized:
-                self.setup()
-
-
-class GeneratorStop(Exception):
-    """Raised by Generators.
-
-    This exception indicates that the generator have reached some stopping
-    criteria, e.g. end of file. Should be caught by the Device to stop output.
-    """
-    pass
-
-
-class QGenerator(Generator):
-    """Generator using `queue.Queue`.
-
-    Implementation of a `Generator` using a queue.
-    Takes data from an input queue and generates frames with the correct
-    framesize. The input queue must be filled fast enough otherwise the
-    device output is cancelled.
-
-    Attributes:
-        Q (`~queue.Queue`): The queue from where data is extracted.
-    """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.Q = queue.Queue()
-        self.buffer = None
-
-    def frame(self):
-        gen_frame = []
-        samples_left = self.device.framesize
-        if self.buffer is not None:
-            gen_frame.append(self.buffer[..., :samples_left])
-            samples_left -= gen_frame[-1].shape[-1]
-        while samples_left > 0:
-            try:
-                frame = self.Q.get(timeout=self.device._generator_timeout)
-            except queue.Empty:
-                raise GeneratorStop('Input Q is empty')
-            gen_frame.append(frame[..., :samples_left])
-            samples_left -= frame.shape[-1]
-        if samples_left < 0:
-            self.buffer = frame[..., samples_left:]
-        else:
-            self.buffer = None
-        return np.concatenate(gen_frame, axis=-1)
-
-    def reset(self):
-        """Clears the input queue."""
-        super().reset()
-        utils.flush_Q(self.Q)
-
-
-class ArbitrarySignalGenerator(Generator):
-    """Repeated generation of arbritrary signals.
-
-    Implementation of `Generator` for arbritrary signals.
-
-    Arguments:
-        repetitions (`float`): The number of cycles to output before stopping, default `np.inf`.
-        **kwargs: Will be saved as ``kwargs`` and accessible in `setup`.
-    Keyword Arguments:
-        signal (`numpy.ndarray`): One cycle of the signal to output.
-    """
-    def __init__(self, repetitions=np.inf, **kwargs):
-        super().__init__(**kwargs)
-        self.repetitions = repetitions  # Default to continious output
+        if repetitions == -1 or (isinstance(repetitions, str) and repetitions.lower()[:3] == 'inf'):
+            repetitions = np.inf
+        self.repetitions = repetitions
         self.reset()
 
-    def frame(self):
-        if self.repetitions_done >= self.repetitions:
-            raise GeneratorStop('Finite number of repetitions reached')
-        samples_left = self.device.framesize
-        gen_frame = []
-        while samples_left > 0:
-            gen_frame.append(self.signal[..., self.idx:self.idx + samples_left])
-            samps_app = gen_frame[-1].shape[-1]
-            samples_left -= samps_app
-            self.idx += samps_app
-            if self.idx >= self.signal.shape[-1]:
-                self.repetitions_done += 1
-                self.idx = 0
-                if self.repetitions_done >= self.repetitions:
-                    gen_frame.append(np.zeros(self.signal.shape[:-1] + (samples_left,)))
-                    samples_left = 0
-        return np.concatenate(gen_frame, axis=-1)
+    def to_dict(self):
+        return super().to_dict() | dict(
+            amplitude=self.amplitude,
+            fade_in=self.fade_in,
+            fade_out=self.fade_out,
+            pre_pad=self.pre_pad,
+            post_pad=self.post_pad,
+            repetitions=self.repetitions,
+        )
 
-    def reset(self):
-        super().reset()
-        self.idx = 0
-        self.repetitions_done = 0
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._repetitions_done = 0
+        self._sample_index = 0
 
-    def setup(self):
-        """Configures the signal.
+    @property
+    def signal(self):
+        try:
+            return self._signal
+        except AttributeError:
+            pass
+        self.setup()
+        return self._signal
 
-        Create the signal manually and pass it while creating the generator
-        as the ``signal`` argument.
+    @signal.setter
+    def signal(self, signal):
+        signal = signal_tools.fade_signals(signal, fade_in=self.fade_in, fade_out=self.fade_out, samplerate=self.samplerate, inplace=False)
+        signal = signal_tools.pad_signals(signal, pre_pad=self.pre_pad, post_pad=self.post_pad, samplerate=self.samplerate)
+        self._signal = signal * self.amplitude
 
-        It is possible to inherit `ArbitrarySignalGenerator` and override the
-        setup method. Create one cycle of the signal and store it in
-        ``self.signal``. Access the underlying device as ``self.device``,
-        which has important properties, e.g. samplerate ``fs``.
-        All keyword arguments passed while creating instances are available
-        as ``self.key``.
+    def generate(self, framesize):
+        if self._repetitions_done >= self.repetitions:
+            return _core.LastFrame(np.zeros(framesize), 0)
 
-        Note:
-            Call `ArbitrarySignalGenerator.setup(self)` from subclasses.
-        """
-        super().setup()
+        start_idx = self._sample_index
+        stop_idx = self._sample_index + framesize
+        signal_length = self.signal.shape[-1]
+
+        if stop_idx <= signal_length:
+            frame = self.signal[..., start_idx:stop_idx]
+        else:
+            num_repeats = np.math.ceil(stop_idx / signal_length)
+            repeated_signal = np.tile(self.signal, num_repeats)
+            frame = repeated_signal[..., start_idx:stop_idx]
+
+        repeats, self._sample_index = divmod(stop_idx, signal_length)
+        self._repetitions_done += repeats
+        if self._repetitions_done >= self.repetitions:
+            if self._sample_index > 0:
+                frame[..., -self._sample_index:] = 0
+            frame = _core.LastFrame(frame, framesize - self._sample_index)
+        else:
+            frame = _core.Frame(frame)
+        return frame
+
+    def once(self):
+        if self._sample_index != 0 and self._repetitions_done != 0:
+            raise RuntimeError('Cannot use method `once` on generator which is running in a streamed pipeline!')
+        framesize = self.repetitions * self.signal.shape[-1]
+
+        frame = self.request(_core.FrameRequest(framesize))
+        self._sample_index = self._repetitions_done = 0
+        return self.push(frame)
 
 
-class SweepGenerator(ArbitrarySignalGenerator):
-    """Swept sine generator.
-
-    Arguments:
-        start_frequency (`float`): Initial frequency of the sweep, in Hz.
-        stop_frequency (`float`): Final frequency of the sweep, in Hz.
-        duration (`float`): Duration of a single sweep, in seconds.
-        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
-        method (`str`, optional): Chooses the type of sweep, see
-            `~scipy.signal.chirp`, default ``'logarithmic'``.
-        bidirectional (`bool`, optional): If the sweep is bidirectional or not,
-            default ``False``.
-    See Also:
-        `ArbitrarySignalGenerator`, `scipy.signal.chirp`
-    """
-    def __init__(self, start_frequency, stop_frequency, duration,
-                 method='logarithmic', bidirectional=False, **kwargs):
+class SweepGenerator(SignalGenerator):
+    def __init__(
+        self,
+        lower_frequency, upper_frequency,
+        sweep_length, method='logarithmic',
+        amplitude_slope=None,
+        **kwargs
+    ):
         super().__init__(**kwargs)
-        self.start_frequency = start_frequency
-        self.stop_frequency = stop_frequency
-        self.duration = duration
+        self.lower_frequency = lower_frequency
+        self.upper_frequency = upper_frequency
+        self.sweep_length = sweep_length
+        self.amplitude_slope = amplitude_slope
         self.method = method
-        self.bidirectional = bidirectional
 
-    def setup(self):
-        super().setup()
-        time_vector = np.arange(round(self.duration * self.device.fs)) / self.device.fs
-        self.signal = waveforms.chirp(time_vector, self.start_frequency, self.duration, self.stop_frequency, method=self.method, phi=90)
-        if self.bidirectional:
-            self.signal = np.concatenate([self.signal, self.signal[::-1]])
-            self.repetitions /= 2
+    def to_dict(self):
+        return super().to_dict() | dict(
+            lower_frequency=self.lower_frequency,
+            upper_frequency=self.upper_frequency,
+            sweep_length=self.sweep_length,
+            amplitude_slope=self.amplitude_slope,
+            method=self.method,
+        )
+
+    def setup(self, **kwargs):
+        super().setup(**kwargs)
+        time_vector = np.arange(round(self.sweep_length * self.samplerate)) / self.samplerate
+        signal = scipy.signal.chirp(t=time_vector, f0=self.lower_frequency, t1=self.sweep_length, f1=self.upper_frequency, method=self.method, phi=-90)
+        last_crossing = -1
+        while np.sign(signal[last_crossing - 1]) == np.sign(signal[-1]):
+            last_crossing -= 1
+        signal[last_crossing:] = 0
+        if self.amplitude_slope is not None:
+            end_value = 10**(6 * self.amplitude_slope / 20 * np.log2(self.upper_frequency / self.lower_frequency))
+            if self.method == 'logarithmic':
+                slope = np.geomspace(1, end_value, signal.size)
+            elif self.method == 'linear':
+                slope = np.linspace(1, end_value, signal.size)
+            else:
+                raise ValueError(f'Cannot use amplitude compensation with sweep method {self.method}')
+            slope /= max(slope)
+        else:
+            slope = 1
+        self.reference = signal.copy()
+        self.signal = signal * slope
 
 
-class MaximumLengthSequenceGenerator(ArbitrarySignalGenerator):
-    """Generation of maximum length sequences.
-
-    Arguments:
-        order (`int`): The order or the sequence. The total length  is ``2**order - 1``.
-        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
-    See Also:
-        `ArbitrarySignalGenerator`, `scipy.signal.max_len_seq`
-    """
-    def __init__(self, order, **kwargs):
+class MaximumLengthGenerator(SignalGenerator):
+    def __init__(self, order=None, sequence_time=None, **kwargs):
         super().__init__(**kwargs)
-        self.order = order
+        if None not in (order, sequence_time):
+            raise ValueError('Cannot give both MLS order and MLS time')
+        elif sequence_time is not None:
+            self._sequence_time = sequence_time
+        elif order is not None:
+            self.order = order
 
-    def setup(self):
-        super().setup()
-        self.sequence, state = scipy.signal.max_len_seq(self.order)
-        self.signal = (1 - 2 * self.sequence).astype('float64')
+    def to_dict(self):
+        return super().to_dict() | dict(
+            order=self.order,
+        )
+
+    @property
+    def sequence_time(self):
+        try:
+            return self._sequence_time
+        except AttributeError:
+            pass
+        try:
+            return (2**self.order - 1) / self.samplerate
+        except AttributeError:
+            raise AttributeError('Cannot use MLS sequence time without a defined samplerate')
+
+    @sequence_time.setter
+    def sequence_time(self, value):
+        try:
+            n_samples = self.samplerate * value
+        except AttributeError:
+            self._sequence_time = value
+            del self._order
+        else:
+            self.order = np.math.ceil(np.log2(n_samples + 1))
+
+    @property
+    def order(self):
+        try:
+            return self._order
+        except AttributeError:
+            pass
+        try:
+            n_samples = self.samplerate * self._sequence_time
+        except AttributeError:
+            raise AttributeError('Cannot use MLS sequence time without a defined samplerate')
+        return np.math.ceil(np.log2(n_samples + 1))
+
+    @order.setter
+    def order(self, value):
+        if not isinstance(value, int):
+            raise TypeError(f"Cannot set order to non-integer value {value}")
+        self._order = value
+        try:
+            del self._sequence_time
+        except AttributeError:
+            pass
+
+    def setup(self, **kwargs):
+        super().setup(**kwargs)
+        self.reference, _ = scipy.signal.max_len_seq(self.order)
+        self.signal = (1 - 2 * self.reference).astype('float64')
 
 
-class FunctionGenerator(Generator):
-    """Generates signals from a shape function.
-
-    Implementation of `Generator` for standard funcitons.
-
-    Arguments:
-        frequency (`float`): The frequecy of the signal, in Hz.
-        repetitions (`float`, optional): The number of repetitions, default `np.inf`.
-        shape (`str`, optional): Function shape, default ``'sine'``. Currently
-            available functions are
-
-                - ``'sine'``: `numpy.sin`
-                - ``'sawtooth'``: `scipy.signal.sawtooth`
-                - ``'square'``: `scipy.signal.square`
-
-        phase_offset (`float`, optional): Phase offset of the signal in radians, default 0.
-        shape_kwargs (`dict`): Keyword arguments for shape function.
-    """
+class ToneGenerator(_Generator):
     _functions = {
         'sin': np.sin,
         'saw': scipy.signal.sawtooth,
         'squ': scipy.signal.square
     }
 
-    def __init__(self, frequency, repetitions=np.inf,
-                 shape='sine', phase_offset=0, shape_kwargs=None, **kwargs):
+    def __init__(
+        self,
+        frequency,
+        amplitude=1,
+        periods=None, duration=None,
+        phase_offset=0,
+        shape='sine',
+        shape_kwargs=None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        self.repetitions = repetitions  # Default to continious output
+
         self.frequency = frequency
+        self.amplitude = amplitude
         self.shape = shape
+        self.shape_kwargs = shape_kwargs if shape_kwargs is not None else {}
         self.phase_offset = phase_offset
-        self.shape_kwargs = {} if shape_kwargs is None else shape_kwargs
 
-    def frame(self):
-        if self.repetitions_done >= self.repetitions:
-            raise GeneratorStop('Finite number of repetitions reached')
-        frame = self._function(self._phase_array + self._phase, **self.shape_kwargs)
-        self._phase += self._phase_per_frame
-        if self.repetitions_done >= self.repetitions:
-            surplus_reps = self.repetitions_done - self.repetitions
-            surplus_samps = round(surplus_reps * self.device.fs / self.frequency)
-            frame[-surplus_samps:] = 0
-        return frame
+        if periods is None and duration is None:
+            self.periods = np.inf
+        elif periods is not None:
+            self.periods = periods
+        elif duration is not None:
+            self.periods = duration * self.frequency
+        else:
+            raise ValueError('Cannot specify both duration and number of repetitions')
 
-    def setup(self):
-        super().setup()
         self.reset()
-        taps = np.arange(self.device.framesize)
-        self._phase_array = 2 * np.pi * taps * self.frequency / self.device.fs
-        self._phase_per_frame = 2 * np.pi * self.frequency / self.device.fs * self.device.framesize
 
-    def reset(self):
-        super().reset()
-        self._phase = self.phase_offset
+    def to_dict(self):
+        return super().to_dict() | dict(
+            frequency=self.frequency,
+            shape=self.shape,
+            phase_offset=self.phase_offset,
+            periods=self.periods,
+            **self.shape_kwargs,
+        )
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._phase = 0
+
+    def generate(self, framesize):
+        if self._phase >= self.periods * 2 * np.pi:
+            return _core.LastFrame(np.zeros(framesize), 0)
+
+        phase = np.arange(framesize) * (2 * np.pi * self.frequency / self.samplerate)
+        signal = self._function(self._phase + self.phase_offset + phase, **self.shape_kwargs) * self.amplitude
+        self._phase += 2 * np.pi * framesize * self.frequency / self.samplerate
+        if self._phase > self.periods * 2 * np.pi:
+            phase_to_mute = self._phase - self.periods * 2 * np.pi
+            samples_to_mute = np.math.floor(phase_to_mute / (2 * np.pi * self.frequency) * self.samplerate)
+            signal[-samples_to_mute:] = 0
+            frame = _core.LastFrame(signal, framesize - samples_to_mute)
+        else:
+            frame = _core.Frame(signal)
+        return frame
 
     @property
     def shape(self):
         return self._shape
 
     @shape.setter
-    def shape(self, val):
-        if val.lower()[:3] in self._functions:
-            self._shape = val.lower()
-            self._function = self._functions[val.lower()[:3]]
+    def shape(self, value):
+        if value[:3].lower() in self._functions:
+            self._shape = value
+            self._function = self._functions[value[:3].lower()]
         else:
-            raise KeyError('Unknown function shape `{}`'.format(val))
-
-    @property
-    def repetitions_done(self):
-        return self._phase / (2 * np.pi)
-
-
-class NoiseGenerator(Generator):
-    """Generates colored noise.
-
-    Implementation of `Generator` for random noise signals.
-
-    Arguments:
-        color (`str`, optional): The color of the noise. Each color corresponds
-            to a inverse frequency power in the noise power density spectrum.
-            Default is ``'white'``.
-
-            - ``'purple'``: -2
-            - ``'blue'``: -1
-            - ``'white'``: 0
-            - ``'pink'``: 1
-            - ``'brown'``: 2
-        method (`str`): The method used to create the noise.
-            Currently two methods are implemented, a ``'fft'`` method and
-            an ``'autoregressive'`` method. The default is ``'autoregressive'``.
-            The autoregressive method is more expensive for small framesizes,
-            but gives the same performance regardless of the framesize. The
-            fft method have bad low-frequency performance for small framesizes.
-        ar_order (`int`): The order for the autoregressive method, default 63.
-    References:
-        N. J. Kasdin, “Discrete simulation of colored noise and stochastic
-        processes and 1/f^α power law noise generation,” Proceedings of the
-        IEEE, vol. 83, no. 5, pp. 802–827, May 1995.
-        :doi:`10.1109/5.381848`
-    Todo:
-        Variable amplitudes and maximum amplitudes.
-
-    """
-    _color_slopes = {
-        'purple': -2,
-        'blue': -1,
-        'white': 0,
-        'pink': 1,
-        'brown': 2
-    }
-
-    def __init__(self, color='white', method='autoregressive',
-                 ar_order=63, **kwargs):
-        super().__init__(**kwargs)
-        self.method = method
-        self.ar_order = ar_order
-        self.color = color
-
-    def _fft_noise(self):
-        normal = np.random.normal(size=self.device.framesize)
-        shaped = ifft(self._spectral_coefficients * fft(normal))
-        return shaped
-
-    def _fft_setup(self):
-        bins = np.arange(self.device.framesize // 2 + 1)  # We are using single sided spectrum
-        bins[0] = 1  # Do not modify DC bin
-        self._spectral_coefficients = bins.astype('double')**(-self.power / 2)
-
-    def _fft_reset(self):
-        del self._spectral_coefficients
-
-    def _ar_noise(self):
-        normal = np.random.normal(size=self.device.framesize)
-        shaped = np.zeros(shape=self.device.framesize)
-        for idx in range(self.device.framesize):
-            shaped[idx] = normal[idx] - (self._ar_coefficients * self._ar_buffer).sum()
-            self._ar_buffer = np.roll(self._ar_buffer, 1)
-            self._ar_buffer[0] = shaped[idx]
-        return shaped
-
-    def _ar_setup(self):
-        self._ar_buffer = np.zeros(self.ar_order - 1)
-        coefficients = np.zeros(self.ar_order)
-        coefficients[0] = 1
-        for k in range(1, self.ar_order):
-            coefficients[k] = (k - 1 - self.power / 2) * coefficients[k - 1] / k
-        self._ar_coefficients = coefficients[1:]
-
-    def _ar_reset(self):
-        del self._ar_buffer
-        del self._ar_coefficients
-
-    _call_methods = {
-        'fft': _fft_noise,
-        'autoregressive': _ar_noise
-    }
-
-    _setup_methods = {
-        'fft': _fft_setup,
-        'autoregressive': _ar_setup
-    }
-
-    _reset_methods = {
-        'fft': _fft_reset,
-        'autoregressive': _ar_reset
-    }
-
-    def frame(self):
-        return self._call_methods[self.method](self)
-
-    def setup(self):
-        super().setup()
-        self._setup_methods[self.method](self)
-
-    def reset(self):
-        super().reset()
-        self._reset_methods[self.method](self)
-
-    @property
-    def color(self):
-        return self._color
-
-    @color.setter
-    def color(self, val):
-        try:
-            self.power = self._color_slopes[val.lower()]
-        except KeyError:
-            raise KeyError('Unknown noise color `{}`'.format(val))
-        except AttributeError:
-            self.power = val
-            self._color = 'custom'
-        else:
-            self._color = val.lower()
-
-    @property
-    def method(self):
-        return self._method
-
-    @method.setter
-    def method(self, val):
-        if val.lower() in self._call_methods:
-            self._method = val.lower()
-        else:
-            raise KeyError('Unknown generation method `{}`'.format(val))
-
-
-class IndexGenerator(Generator):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.index = 0
-
-    def frame(self):
-        frame = np.arange(self.index, self.index + self.device.framesize)
-        self.index += self.device.framesize
-        return frame
-
-    def reset(self):
-        super().reset()
-        self.index = 0
+            raise ValueError(f'Unknown tone shape {value}')

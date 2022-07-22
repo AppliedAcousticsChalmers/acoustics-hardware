@@ -21,10 +21,10 @@ with version_manager() as version:
         install_requires=[
             'numpy',
             'scipy',
-            'h5py',
             'sounddevice',
             'nidaqmx;platform_system=="Windows"',
             'pyserial',
             'SchunkMotionProtocol',
+            'zarr',
         ],
     )

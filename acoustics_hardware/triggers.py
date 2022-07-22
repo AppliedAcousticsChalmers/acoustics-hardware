@@ -1,288 +1,291 @@
 import numpy as np
-import threading
-import logging
-import warnings
-
-from . import processors
-
-logger = logging.getLogger(__name__)
+import scipy.signal
+from . import _core
+import collections
 
 
-class Trigger:
-    """Base class for Trigger implementation.
+class Gate(_core.SamplerateFollower):
+    def __init__(
+        self,
+        open_trigger=None,
+        close_trigger=None,
+        pre_trigger=None,
+        post_trigger=None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.open_trigger = open_trigger
+        self.close_trigger = close_trigger
+        self.pre_trigger = pre_trigger
+        self.post_trigger = post_trigger
 
-    A Trigger is an object that performs a test on all input data from a
-    Device, regardless if the input is set as active or not. If the test
-    evaluates to ``True`` the trigger will perform a set of actions,
-    e.g. activate the input of a Device.
-
-    Arguments:
-        actions (callable or list of callables): The actions that will be
-            called each time the test evaluates to ``True``.
-        false_actions (callable or list of callables): The actions that will be
-            called each time the test evaluates to ``False``.
-        auto_deactivate (`bool`): Sets if the trigger deactivates itself when
-            the test is ``True``. Useful to only trigger once, dafault ``True``.
-        use_calibrations (`bool`): Sets if calibration values from the Device
-            should be used for the test, default ``True``.
-    Attributes:
-        active (`~threading.Event`): Controls if the trigger is active or not.
-            A deactivated trigger will still test (e.g. to track levels), but
-            not take action. Triggers start of as active unless manually deactivated.
-    """
-    def __init__(self, action=None, false_action=None, auto_deactivate=True,
-                 use_calibrations=True, device=None, align_device=None, side='input'):
-        self.side = side
-        self.device = device
-        # self.active = multiprocessing.Event()
-        self.active = threading.Event()
-        self.active.set()
-
-        self.actions = []
-        if action is not None:
-            try:
-                self.actions.extend(action)
-            except TypeError:
-                self.actions.append(action)
-
-        self.false_actions = []
-        if false_action is not None:
-            try:
-                self.false_actions.extend(false_action)
-            except TypeError:
-                self.false_actions.append(false_action)
-
-        self.alignment = None
-        self.align_devices = []
-        if align_device is not None:
-            try:
-                self.align_devices.extend(align_device)
-            except TypeError:
-                self.align_devices.append(align_device)
-
-        self.auto_deactivate = auto_deactivate
-        self.use_calibrations = use_calibrations
-
-    def __call__(self, frame):
-        """Manages testing and actions."""
-        # We need to perform the test event if the triggering is disabled
-        # Some triggers (RMSTrigger) needs to update their state continuously to work as intended
-        # If e.g. RMSTrigger cannot update the level with the triggering disabled, it will always
-        # start form zero
-        test = self.test(frame * self.calibrations)
-        if self.active.is_set():
-            # logger.debug('Testing in {}'.format(self.__class__.__name__))
-            if any(test):
-                self.alignment = np.where(test)[0][0] / self.device.fs
-                test = True
-            else:
-                self.alignment = None
-                test = False
-            if test:
-                [action() for action in self.actions]
-                for dev in self.align_devices:
-                    dev._trigger_alignment = self.alignment
-            else:
-                [action() for action in self.false_actions]
-
-    def test(self, frame):
-        """Performs test.
-
-        The trigger conditions should be implemented here.
-
-        Arguments:
-            frame (`numpy.ndarray`): The current input frame to test.
-        Returns:
-            `bool`: ``True`` -> do ``actions``, ``False`` -> do ``false_actions``
-        """
-        raise NotImplementedError('Required method `test` is not implemented in {}'.format(self.__class__.__name__))
-
-    def reset(self):
-        """Resets the trigger state."""
-        self.active.set()
-
-    def setup(self):
-        """Configures trigger state."""
-        if self.side == 'input':
-            if self.use_calibrations:
-                calibrations = self.device.calibrations
-            else:
-                calibrations = np.ones(len(self.device.inputs))
-        else:
-            calibrations = np.ones(len(self.device.outputs))
-        self.calibrations = calibrations[:, np.newaxis]
-
-    @property
-    def auto_deactivate(self):
-        return self.active.clear in self.actions
-
-    @auto_deactivate.setter
-    def auto_deactivate(self, value):
-        if value and not self.auto_deactivate:
-            self.actions.insert(0, self.active.clear)
-        elif self.auto_deactivate and not value:
-            self.actions.remove(self.active.clear)
-
-    @property
-    def device(self):
+    def to_dict(self):
         try:
-            return self._device
+            open_trigger = self.open_trigger.to_dict()
         except AttributeError:
-            return None
+            open_trigger = str(self.open_trigger)
+        try:
+            close_trigger = self.close_trigger.to_dict()
+        except AttributeError:
+            close_trigger = str(self.close_trigger)
+        return super().to_dict() | dict(
+            open_trigger=open_trigger,
+            close_trigger=close_trigger,
+            pre_trigger=self.pre_trigger,
+            post_trigger=self.post_trigger,
+        )
 
-    @device.setter
-    def device(self, dev):
-        if self.device is not None:
-            # Unregister from the previous device
-            if self.device.initialized:
-                self.reset()
-            if self.side == 'input':
-                self.device._Device__triggers.remove(self)
-            elif self.side == 'output':
-                self.device._Device__output_triggers.remove(self)
-        self._device = dev
-        if self.device is not None:
-            # Register to the new device
-            if self.side == 'input':
-                self.device._Device__triggers.append(self)
-            elif self.side == 'output':
-                self.device._Device__output_triggers.append(self)
-                if self.device.initialized:
-                    self.setup()
+    def setup(self, **kwargs):
+        super().setup(**kwargs)
+        if self.open_trigger is not None:
+            self.open_trigger.setup()
+        if self.close_trigger is not None:
+            self.close_trigger.setup()
+        if self.pre_trigger:
+            self._pre_trigger_samples = np.math.ceil(self.pre_trigger * self.samplerate)
+            self._pre_trigger_buffer = collections.deque()
+        if self.post_trigger:
+            self._post_trigger_samples = np.math.ceil(self.post_trigger * self.samplerate)
+        self.reset()
+        #     self._post_trigger_buffer = collections.deque()
+        #     self._kept_samples = 0
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self.open = True if self.open_trigger is None else False
+        self.waiting = True
+        self._post_close_buffer = None
+        if self.open_trigger is not None:
+            self.open_trigger.reset()
+        if self.close_trigger is not None:
+            self.close_trigger.reset()
+        if self.pre_trigger:
+            self._pre_trigger_buffer.clear()
+            self._buffered_samples = 0
+        if self.post_trigger:
+            self._remaining_post_trigger_samples = 0
+
+    @property
+    def open_trigger(self):
+        return self._open_trigger
+
+    @open_trigger.setter
+    def open_trigger(self, trigger):
+        if trigger is not None:
+            self._open_trigger = trigger
+            trigger._upstream = self
+        else:
+            self._open_trigger = None
+
+    @property
+    def close_trigger(self):
+        return self._close_trigger
+
+    @close_trigger.setter
+    def close_trigger(self, trigger):
+        if trigger is not None:
+            self._close_trigger = trigger
+            trigger._upstream = self
+        else:
+            self._close_trigger = None
+
+    def process(self, frame):
+        # The gate can be in the following states, which happen in this order
+        # 1) Closed and waiting for the opening trigger
+        # 2) Open and waiting for the closing trigger
+        # 3) Open and collecting post-trigger data
+        # 4) Closed with no intent of opening?
+        if self._post_close_buffer is not None:
+            frame.frame = np.concatenate((self._post_close_buffer, frame.frame), axis=1)
+            self._post_close_buffer = None
+        if not self.open and self.waiting and self.open_trigger is not None:
+            return self._wait_for_opening_trigger(frame)
+        if self.open and self.waiting and self.close_trigger is not None:
+            return self._wait_for_closing_trigger(frame)
+        if self.open and not self.waiting:
+            return self._collect_post_trigger_samples(frame)
+
+    def _wait_for_opening_trigger(self, frame):
+        frame = self.open_trigger.process(frame)
+        if isinstance(frame, _core.TriggerFrame):
+            trig_idx = frame.indices[0]
+            frame.frame, post_frame = frame.frame[:, :trig_idx], frame.frame[:, trig_idx:]
+        else:
+            trig_idx = None
+
+        if self.pre_trigger:
+            self._pre_trigger_buffer.append(frame.frame)
+            self._buffered_samples += frame.frame.shape[1]
+            while self._buffered_samples - self._pre_trigger_buffer[0].shape[1] > self._pre_trigger_samples:
+                self._buffered_samples -= self._pre_trigger_buffer.popleft().shape[1]
+
+        if trig_idx is None:
+            # Gate is stil closed!
+            return
+
+        self.open = True
+        self.open_trigger.reset()  # We won't feed data into the open trigger for a while, so it needs to start anew on next call.
+        if self.pre_trigger:
+            pre_frame = np.concatenate(self._pre_trigger_buffer, axis=1)[:, -self._pre_trigger_samples:]
+            self._pre_trigger_buffer.clear()
+            self._buffered_samples = 0
+        else:
+            pre_frame = np.zeros((frame.frame.shape[0], 0))
+        # frame = _core.GateOpenFrame(frame.frame[:, ])
+
+        # Run the close trigger on the frame from the opening trigger point, not including the pre-trigger data.
+        if self.close_trigger is not None:
+            self.waiting = True
+            post_frame = self._wait_for_closing_trigger(_core.Frame(post_frame))
+        elif self.post_trigger:
+            self.waiting = False
+            self._remaining_post_trigger_samples = self._post_trigger_samples + 1
+            post_frame = self._collect_post_trigger_samples(_core.Frame(post_frame))
+        else:
+            post_frame = _core.GateCloseFrame(post_frame[:, :1])
+
+        frame = np.concatenate((pre_frame, post_frame.frame), axis=1)
+        if isinstance(post_frame, _core.GateCloseFrame):
+            return _core.GateOpenCloseFrame(frame)
+        return _core.GateOpenFrame(frame)
+
+    def _wait_for_closing_trigger(self, frame):
+        frame = self.close_trigger.process(frame)
+        if not isinstance(frame, _core.TriggerFrame):
+            return frame
+
+        trig_idx = frame.indices[0] + 1
+        self.close_trigger.reset()  # We won't feed data into the close trigger for a while, so it needs to start anew on next call.
+        pre_frame, post_frame = frame.frame[:, :trig_idx], frame.frame[:, trig_idx:]
+        if self.post_trigger:
+            self.waiting = False
+            self._remaining_post_trigger_samples = self._post_trigger_samples
+            post_frame = self._collect_post_trigger_samples(_core.Frame(post_frame))
+            post_frame.frame = np.concatenate([pre_frame, post_frame.frame], axis=1)
+            return post_frame
+        else:
+            self.open = False
+            self._post_close_buffer = post_frame
+            return _core.GateCloseFrame(pre_frame)
+
+    def _collect_post_trigger_samples(self, frame):
+        if self._remaining_post_trigger_samples > frame.frame.shape[1]:
+            self._remaining_post_trigger_samples -= frame.frame.shape[1]
+            return frame
+
+        self.open = False
+        self.waiting = True  # TODO: Always reactivate?
+        pre_frame, post_frame = frame.frame[:, :self._remaining_post_trigger_samples], frame.frame[:, self._remaining_post_trigger_samples:]
+        frame = _core.GateCloseFrame(pre_frame)
+        self._remaining_post_trigger_samples = 0
+        self._post_close_buffer = post_frame
+        return frame
 
 
-class RMSTrigger(Trigger):
-    """RMS level trigger.
-
-    Triggers actions based on a detected root-mean-square level.
-
-    Arguments:
-        level (`float`): The level at which to trigger.
-        channel (`int`): The index of the channel on which to trigger.
-        region (``'Above'`` or ``'Below'``, optional): Defines if the triggering
-            happens when the detected level rises above or falls below the set
-            level, default ``'Above'``.
-        level_detector_args (`dict`, optional): Passed as keyword arguments to
-            the internal `~.processors.LevelDetector`.
-        **kwargs: Extra keyword arguments passed to `Trigger`.
-
-    Todo:
-        Rename region to slope?
-    """
-    def __init__(self, level, channel, region='Above', level_detector_args=None, **kwargs):
+class Trigger(_core.SamplerateFollower):
+    def __init__(self, channel=0, **kwargs):
         super().__init__(**kwargs)
         self.channel = channel
-        # self.level_detector = LevelDetector(channel=channel, fs=fs, **kwargs)
-        self.region = region
-        self.trigger_level = level
-        self.level_detector_args = level_detector_args if level_detector_args is not None else {}
 
-    def setup(self):
-        super().setup()
-        self.level_detector = processors.LevelDetector(channel=self.channel, device=self.device, **self.level_detector_args)
+    def to_dict(self):
+        return super().to_dict() | dict(
+            channel=self.channel,
+        )
 
-    def test(self, frame):
-        # logger.debug('Testing in RMS trigger')
-        levels = self.level_detector(frame)
-        return self._sign * levels >= self.trigger_level * self._sign
-        # meets_criteria = self._sign * levels > self.trigger_level * self._sign
-        # if any(meets_criteria):
-            # self.trigger_alignment = np.where(meets_criteria)[0][0]
-            # return True
-        # else:
-            # return False
+    def process(self, frame):
+        if isinstance(frame, _core.Frame):
+            indices = self.detect(frame.frame[self.channel])
+            if indices is not None:
+                frame = _core.TriggerFrame(frame.frame, indices)
+        return frame
 
-    def reset(self):
-        super().reset()
-        self.level_detector.reset()
-
-    @property
-    def region(self):
-        if self._sign == 1:
-            return 'Above'
-        else:
-            return 'Below'
-
-    @region.setter
-    def region(self, value):
-        if value.lower() == 'above':
-            self._sign = 1
-        elif value.lower() == 'below':
-            self._sign = -1
-        else:
-            raise ValueError('{} not a valid region for RMS trigger.'.format(value))
+    def detect(self, frame):
+        ...
 
 
 class PeakTrigger(Trigger):
-    """Peak level trigger.
-
-    Triggers actions based on detected peak level.
-
-    Arguments:
-        level (`float`): The level at which to trigger.
-        channel (`int`): The index of the channel on which to trigger.
-        region (``'Above'`` or ``'Below'``, optional): Defines if the triggering
-            happens when the detected level rises above or falls below the set
-            level, default ``'Above'``.
-        **kwargs: Extra keyword arguments passed to `Trigger`.
-
-    Todo:
-        Rename region to slope?
-    """
-    def __init__(self, level, channel, region='Above', **kwargs):
+    def __init__(self, threshold=0, edge='rising', **kwargs):
         super().__init__(**kwargs)
-        self.region = region
-        self.trigger_level = level
-        self.channel = channel
+        self.threshold = threshold
+        self.edge = edge
+        self._prev_val = None
 
-    def test(self, frame):
-        # logger.debug('Testing in Peak triggger')
-        levels = np.abs(frame[self.channel])
-        return self._sign * levels >= self.trigger_level * self._sign
-        # return any(self._sign * levels > self.trigger_level * self._sign)
+    def to_dict(self):
+        return super().to_dict() | dict(
+            threshold=self.threshold,
+            edge=self.edge,
+        )
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._prev_val = None
 
     @property
-    def region(self):
-        if self._sign == 1:
-            return 'Above'
-        else:
-            return 'Below'
+    def threshold(self):
+        return self._threshold
 
-    @region.setter
-    def region(self, value):
-        if value.lower() == 'above':
-            self._sign = 1
-        elif value.lower() == 'below':
-            self._sign = -1
-        else:
-            raise ValueError('{} not a valid region for peak trigger.'.format(value))
+    @threshold.setter
+    def threshold(self, val):
+        self._threshold = val
+
+    def detect(self, frame):
+        if self._prev_val is None:
+            self._prev_val = frame[0]
+        signs = np.sign(np.insert(frame, 0, self._prev_val) - self._threshold)
+        self._prev_val = frame[-1]
+
+        if self.edge == 'crossing':
+            test = np.diff(signs)
+        elif self.edge == 'rising':
+            test = np.diff(signs) > 0
+        elif self.edge == 'falling':
+            test = np.diff(signs) < 0
+        elif self.edge == 'above':
+            test = signs > 0
+        elif self.edge == 'below':
+            test = signs < 0
+        if np.any(test):
+            # Activation met, we'll stop tracking the levels!
+            return np.nonzero(test)[0]
 
 
-class DelayedAction:
-    """Delays an action.
+class RMSTrigger(PeakTrigger):
+    def __init__(self, threshold, time_constant, **kwargs):
+        super().__init__(threshold=threshold, **kwargs)
+        self.time_constant = time_constant
+        self._state = None
 
-    When called, an instance of this class will excecute a specified action
-    after a set delay. This can be useful to create timed measurements or
-    pauses in a longer sequence.
+    def to_dict(self):
+        return super().to_dict() | dict(
+            time_constant=self.time_constant,
+        )
 
-    Arguments:
-        action (callable): Any callable action. This can be a callable class,
-            a user defined funciton, or a method of another class.
-            If several actions are required, pass an iterable of callables.
-        time (`float`): The delay time, in seconds.
-    """
+    @property
+    def threshold(self):
+        return self._threshold ** 0.5
 
-    def __init__(self, action, time):
-        actions = []
-        try:
-            actions.extend(action)
-        except TypeError:
-            actions.append(action)
-        self.actions = actions
-        self.time = time
-        # self.timer = Timer(interval=time, function=action)
+    @threshold.setter
+    def threshold(self, val):
+        self._threshold = val ** 2
 
-    def __call__(self):
-        timer = threading.Timer(interval=self.time, function=lambda: [action() for action in self.actions])
-        timer.start()
-        # self.timer.start()
+    def setup(self, **kwargs):
+        super().setup(**kwargs)
+        self._digital_time_coeff = np.exp(-1 / (self.time_constant * self.samplerate))
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._state = None
+
+    def detect(self, frame):
+        if self._state is None:
+            self._state = scipy.signal.lfilter_zi(
+                [1 - self._digital_time_coeff],
+                [1, -self._digital_time_coeff],
+            ) * frame[0]**2
+        levels, self._state = scipy.signal.lfilter(
+            [1 - self._digital_time_coeff],
+            [1, -self._digital_time_coeff],
+            frame**2, zi=self._state
+        )
+
+        return super().detect(levels)
