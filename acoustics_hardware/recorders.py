@@ -18,21 +18,29 @@ class InternalRecorder(_Recorder):
 
     def reset(self, **kwargs):
         super().reset(**kwargs)
-        self._storage = []
+        self._storage = [[]]
 
     def process(self, frame):
         if isinstance(frame, _core.Frame):
-            self._storage.append(frame.frame)
+            self._storage[-1].append(frame)
+            if isinstance(frame, _core.GateCloseFrame):
+                self._storage.append([])
         return frame
 
     @property
     def recorded_data(self):
-        return np.concatenate(self._storage, axis=-1)
+        series = [np.concatenate([frame.frame for frame in series], axis=-1) for series in self._storage if len(series) > 0]
+        if len(series) == 1:
+            return series[0]
+        try:
+            return np.stack(series, axis=0)
+        except ValueError:
+            return series
 
 
 class ZArrRecorder(_Recorder):
     timeout = 1
-    def __init__(self, filename=None, mode='w-', chunksize=50000, threaded=False, status_message_interval=None, **kwargs):
+    def __init__(self, filename=None, mode='w-', chunksize=50000, threaded=False, series_written_message=False, chunk_written_message=False, **kwargs):
         super().__init__(**kwargs)
         if filename is None:
             filename = timestamps.timestamp('filename')
@@ -45,7 +53,8 @@ class ZArrRecorder(_Recorder):
             raise FileExistsError(f"File {self.filename} already exists on disk, use overwriting ('w') or appending ('a') mode if desired.")
         self.chunksize = chunksize
         self.threaded = threaded
-        self.status_message_interval = status_message_interval
+        self.series_written_message = series_written_message
+        self.chunk_written_message = chunk_written_message
         self._is_ready = False
 
     def setup(self, **kwargs):
@@ -64,10 +73,10 @@ class ZArrRecorder(_Recorder):
             self.setup()
         if isinstance(frame, _core.Frame):
             if self.threaded:
-                self._q.put(frame.frame)
+                self._q.put(frame)
             else:
                 try:
-                    self.writer.send(frame.frame)
+                    self.writer.send(frame)
                 except StopIteration:
                     pass
         return frame
@@ -75,52 +84,58 @@ class ZArrRecorder(_Recorder):
     def initizlize_writer(self):
         chunksize = self.chunksize
         # shape and chunksize will be ignored if the file exists and mode is append
-        storage = zarr.open(self.filename, mode=self.mode, shape=(0, 0), chunks=(1, chunksize), dtype='float64', compressor=None)
-        if storage.attrs.setdefault('samplerate', self.samplerate) != self.samplerate:
-            raise ValueError(f'Trying to append data with samplerate {self.samplerate} to file with samplerate {storage.attrs["samplerate"]}')
-        storage.attrs.setdefault('start_time', timestamps.timestamp())
+        storage = zarr.hierarchy.open_group(self.filename, mode=self.mode)
 
-        if self.status_message_interval not in (False, None):
-            if self.status_message_interval is True:
-                self.status_message_interval = 1
-            status_message_interval = round(self.status_message_interval * self.samplerate)
-        else:
-            status_message_interval = np.inf
-        samps_since_last_status = 0
-
-        write_idx = 0
         frame = (yield)
-        channels, framesize = frame.shape
-        if storage.shape[0] == 0:
-            storage.append(np.zeros(shape=(channels, 0)), axis=0)
-        if storage.shape[0] != channels:
-            raise ValueError(f'Trying to append {channels} channels to a file with {storage.shape[0]} channels')
-        chunksize = storage.chunks[1]  # In case we are appending, we should work with the original chunksize
-        buffer = np.zeros(shape=(channels, chunksize))
+        channels, framesize = frame.frame.shape
+        n_series = 0
+        z = None
+        while not isinstance(frame, _core.LastFrame):
+            channels, framesize = frame.frame.shape
+            if z is None:
+                z = storage.create(
+                    name=timestamps.timestamp('filename', microseconds=True),
+                    shape=(channels, 0), chunks=(1, chunksize), dtype=frame.frame.dtype,
+                    compressor=None,
+                )
+                buffer = np.zeros(shape=(channels, chunksize), dtype=frame.frame.dtype)
+                write_idx = 0
+                z.attrs['samplerate'] = self.samplerate
 
-        while frame is not None:
-            framesize = frame.shape[1]
-
-            if framesize < chunksize - write_idx:
+            if isinstance(frame, _core.GateCloseFrame):
+                # Gate just closed on this frame,
+                # write what's in the buffer as well this frame and close the array store
+                z.append(buffer[:, :write_idx], axis=1)
+                z.append(frame.frame, axis=1)
+                n_series += 1
+                if self.series_written_message:
+                    print(f'Finished time series no. {n_series} with {z.shape[1] / self.samplerate:.3f} seconds', flush=True)
+                z = None  # Indicates that we should start a new series
+                frame = (yield)
+            elif framesize < chunksize - write_idx:
                 # We can write the entire frame to the buffer
-                buffer[:, write_idx:write_idx + framesize] = frame
+                buffer[:, write_idx:write_idx + framesize] = frame.frame
                 write_idx += framesize
                 # Get a new frame
                 frame = (yield)
             else:
                 # The current frame will fill the buffer
-                buffer[:, write_idx:] = frame[:, :chunksize - write_idx]
+                buffer[:, write_idx:] = frame.frame[:, :chunksize - write_idx]
                 # Write and reset the buffer, keep the rest of the frame
-                storage.append(buffer, axis=1)
-                frame = frame[:, chunksize - write_idx:]
+                z.append(buffer, axis=1)
+                if self.chunk_written_message:
+                    print(f'{z.shape[1] / self.samplerate:.3f} seconds ({z.shape[1]} samples) recorded in this series', flush=True)
+                frame.frame = frame.frame[:, chunksize - write_idx:]
                 write_idx = 0
 
-                samps_since_last_status += chunksize
-                if samps_since_last_status >= status_message_interval:
-                    print(f'{storage.shape[1] / self.samplerate:.3f} seconds ({storage.shape[1]} samples) recorded in total', flush=True)
-                    samps_since_last_status = 0
-        # Write any potential data left in the buffer. This might not be chunk-aligned.
-        storage.append(buffer[:, :write_idx], axis=1)
+        if z is not None:
+            # We got a last frame, which might contain data.
+            # If the series is still open, we should write the data remaining in the buffer,
+            # as well as the data in the last frame.
+            z.append(buffer[:, :write_idx], axis=1)
+            z.append(frame.frame, axis=1)
+        elif frame.frame.size:
+            raise RuntimeError('Got a last frame which has data but the recording series is already closed. This should never happen...')
         self._is_ready = False
 
     def threaded_writer(self):

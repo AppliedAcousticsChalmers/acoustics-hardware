@@ -6,4 +6,4 @@ __version_info__ = _version.version_info
 __version__ = _version.version
 del _version
 
-from . import interfaces, generators, recorders, analysis, signal_tools, timestamps  # noqa: E402, F401
+from . import interfaces, generators, recorders, analysis, signal_tools, timestamps, triggers  # noqa: E402, F401
