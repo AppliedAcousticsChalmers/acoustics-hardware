@@ -41,6 +41,16 @@ class SignalGenerator(_Generator):
         self.repetitions = repetitions
         self.reset()
 
+    def to_dict(self):
+        return super().to_dict() | dict(
+            amplitude=self.amplitude,
+            fade_in=self.fade_in,
+            fade_out=self.fade_out,
+            pre_pad=self.pre_pad,
+            post_pad=self.post_pad,
+            repetitions=self.repetitions,
+        )
+
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._repetitions_done = 0
@@ -111,6 +121,15 @@ class SweepGenerator(SignalGenerator):
         self.amplitude_slope = amplitude_slope
         self.method = method
 
+    def to_dict(self):
+        return super().to_dict() | dict(
+            lower_frequency=self.lower_frequency,
+            upper_frequency=self.upper_frequency,
+            sweep_length=self.sweep_length,
+            amplitude_slope=self.amplitude_slope,
+            method=self.method,
+        )
+
     def setup(self, **kwargs):
         super().setup(**kwargs)
         time_vector = np.arange(round(self.sweep_length * self.samplerate)) / self.samplerate
@@ -143,6 +162,11 @@ class MaximumLengthGenerator(SignalGenerator):
             self._sequence_time = sequence_time
         elif order is not None:
             self.order = order
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            order=self.order,
+        )
 
     @property
     def sequence_time(self):
@@ -203,6 +227,7 @@ class ToneGenerator(_Generator):
     def __init__(
         self,
         frequency,
+        amplitude=1,
         periods=None, duration=None,
         phase_offset=0,
         shape='sine',
@@ -212,6 +237,7 @@ class ToneGenerator(_Generator):
         super().__init__(**kwargs)
 
         self.frequency = frequency
+        self.amplitude = amplitude
         self.shape = shape
         self.shape_kwargs = shape_kwargs if shape_kwargs is not None else {}
         self.phase_offset = phase_offset
@@ -227,6 +253,15 @@ class ToneGenerator(_Generator):
 
         self.reset()
 
+    def to_dict(self):
+        return super().to_dict() | dict(
+            frequency=self.frequency,
+            shape=self.shape,
+            phase_offset=self.phase_offset,
+            periods=self.periods,
+            **self.shape_kwargs,
+        )
+
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._phase = 0
@@ -236,7 +271,7 @@ class ToneGenerator(_Generator):
             return _core.LastFrame(np.zeros(framesize), 0)
 
         phase = np.arange(framesize) * (2 * np.pi * self.frequency / self.samplerate)
-        signal = self._function(self._phase + self.phase_offset + phase, **self.shape_kwargs)
+        signal = self._function(self._phase + self.phase_offset + phase, **self.shape_kwargs) * self.amplitude
         self._phase += 2 * np.pi * framesize * self.frequency / self.samplerate
         if self._phase > self.periods * 2 * np.pi:
             phase_to_mute = self._phase - self.periods * 2 * np.pi

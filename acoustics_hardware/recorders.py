@@ -55,7 +55,16 @@ class ZArrRecorder(_Recorder):
         self.threaded = threaded
         self.series_written_message = series_written_message
         self.chunk_written_message = chunk_written_message
-        self._is_ready = False
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            filename=self.filename,
+            chunksize=self.chunksize,
+            thereaded=self.threaded,
+            mode=self.mode,
+            series_written_message=self.series_written_message,
+            chunk_written_message=self.chunk_written_message,
+        )
 
     def setup(self, **kwargs):
         super().setup(**kwargs)
@@ -101,6 +110,7 @@ class ZArrRecorder(_Recorder):
                 buffer = np.zeros(shape=(channels, chunksize), dtype=frame.frame.dtype)
                 write_idx = 0
                 z.attrs['samplerate'] = self.samplerate
+                z.attrs['pipeline'] = self._pipeline.to_dict()
 
             if isinstance(frame, _core.GateCloseFrame):
                 # Gate just closed on this frame,

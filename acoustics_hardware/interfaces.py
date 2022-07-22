@@ -110,6 +110,12 @@ class _StreamedInterface(_core.SamplerateDecider):
         self.input_channels = self._input_channels(input_channels)
         self.output_channels = self._output_channels(output_channels)
 
+    def to_dict(self):
+        return super().to_dict() | dict(
+            input_channels=repr(self.input_channels),
+            output_channels=repr(self.output_channels),
+        )
+
     def process(self, packet):
         frame = framesize = None
         if isinstance(packet, _core.Frame):
@@ -198,6 +204,13 @@ class AudioInterface(_StreamedInterface):
         self._input_device['index'] = device_list.index(self._input_device)
         self._output_device = sd.query_devices(output_name)
         self._output_device['index'] = device_list.index(self._output_device)
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            input_device=self._input_device['name'],
+            output_device=self._output_device['name'],
+            framesize=self.framesize,
+        )
 
     def run(self):
         outputs = [ch.channel for ch in self.output_channels]
@@ -393,6 +406,12 @@ class NationalInstrumentsDaqmx(_StreamedInterface):
         super().__init__(**kwargs)
         self.framesize = framesize
         self.buffer_n_frames = buffer_n_frames
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            name=self.name,
+            framesize=self.framesize,
+        )
 
     @property
     def samplerate(self):

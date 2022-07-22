@@ -43,12 +43,21 @@ class GateOpenCloseFrame(GateOpenFrame, GateCloseFrame):
 class Pipeline:
     def __init__(self, *nodes):
         self.nodes = nodes
+        for node in self:
+            node._pipeline = self
 
-    def __repr__(self):
+    def __str__(self):
         return str([node.__class__.__name__ for node in self])
 
     def __iter__(self):
         return iter(self.nodes)
+
+    def to_dict(self):
+        from . import __version_info__
+        return dict(
+            package_version=__version_info__,
+            nodes=[node.to_dict() for node in self]
+        )
 
     @property
     def samplerate_decider(self):
@@ -94,6 +103,7 @@ class Node:
     """Generic pipeline Node."""
 
     def __init__(self):
+        self._pipeline = None
         self._is_ready = False
         self.__upstream = None
         self.__downstream = None
@@ -104,6 +114,9 @@ class Node:
             other._upstream = self
             return Pipeline(self, other)
         return NotImplemented
+
+    def to_dict(self):
+        return dict(type=self.__class__.__name__)
 
     def setup(self):
         """Run setup for this Node."""
@@ -191,6 +204,11 @@ class SamplerateDecider(Node):
     def __init__(self, samplerate, **kwargs):
         super().__init__(**kwargs)
         self.samplerate = samplerate
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            samplerate=self.samplerate,
+        )
 
     def _upstream_changed(self):
         super()._upstream_changed()

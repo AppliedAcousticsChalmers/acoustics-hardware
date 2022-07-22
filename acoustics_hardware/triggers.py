@@ -19,6 +19,22 @@ class Gate(_core.SamplerateFollower):
         self.pre_trigger = pre_trigger
         self.post_trigger = post_trigger
 
+    def to_dict(self):
+        try:
+            open_trigger = self.open_trigger.to_dict()
+        except AttributeError:
+            open_trigger = str(self.open_trigger)
+        try:
+            close_trigger = self.close_trigger.to_dict()
+        except AttributeError:
+            close_trigger = str(self.close_trigger)
+        return super().to_dict() | dict(
+            open_trigger=open_trigger,
+            close_trigger=close_trigger,
+            pre_trigger=self.pre_trigger,
+            post_trigger=self.post_trigger,
+        )
+
     def setup(self, **kwargs):
         super().setup(**kwargs)
         if self.open_trigger is not None:
@@ -171,6 +187,11 @@ class Trigger(_core.SamplerateFollower):
         super().__init__(**kwargs)
         self.channel = channel
 
+    def to_dict(self):
+        return super().to_dict() | dict(
+            channel=self.channel,
+        )
+
     def process(self, frame):
         if isinstance(frame, _core.Frame):
             indices = self.detect(frame.frame[self.channel])
@@ -188,6 +209,12 @@ class PeakTrigger(Trigger):
         self.threshold = threshold
         self.edge = edge
         self._prev_val = None
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            threshold=self.threshold,
+            edge=self.edge,
+        )
 
     def reset(self, **kwargs):
         super().reset(**kwargs)
@@ -227,6 +254,11 @@ class RMSTrigger(PeakTrigger):
         super().__init__(threshold=threshold, **kwargs)
         self.time_constant = time_constant
         self._state = None
+
+    def to_dict(self):
+        return super().to_dict() | dict(
+            time_constant=self.time_constant,
+        )
 
     @property
     def threshold(self):
