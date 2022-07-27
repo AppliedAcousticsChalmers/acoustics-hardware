@@ -1,13 +1,19 @@
 name: acoustics-hardware-dev
+  - defaults
+  - conda-forge
 dependencies:
-  - numpy
-  - scipy
-  - jupyter
-  - sphinx
+  - autopep8 # for code formatting
   - flake8
-  - pydocstyle
+  - jupyter
+  - jupyter_nbextensions_configurator # for notebook extensions
+  - jupyter_contrib_nbextensions # for notebook extensions
+  - numpy >=1.17
   - pip
+  - pydocstyle
+  - scipy
+  - sphinx
   - pip:
-    - sphinx_rtd_theme
     - -e .
     - ipympl # for interactive plots in jupyter with matplotlib
+    - pyfar >=0.2 # for spherical sampling grids
+    - sphinx_rtd_theme

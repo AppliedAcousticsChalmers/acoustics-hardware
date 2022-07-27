@@ -27,4 +27,11 @@ with version_manager() as version:
             'pyserial',
             'SchunkMotionProtocol',
         ],
+        extras_require={
+            'with_notebooks': [
+                'ipython',
+                'ipywidgets',
+                'pyfar',
+            ],
+        },
     )
