@@ -1,4 +1,5 @@
 name: acoustics-hardware-dev
+channels:
   - defaults
   - conda-forge
 dependencies:
@@ -13,7 +14,9 @@ dependencies:
   - scipy
   - sphinx
   - pip:
-    - -e .
+    - --editable .
     - ipympl # for interactive plots in jupyter with matplotlib
+    # This does not work unfortunately (stuck on `Installing pip dependencies`, although it should?
+    # - pyfar >=0.2 --install-option="--no-dependencies" # for spherical sampling grids
     - pyfar >=0.2 # for spherical sampling grids
     - sphinx_rtd_theme
