@@ -149,12 +149,13 @@ class VariSphere:
     to the motors.
 
     Arguments:
-        az_port (`str`): The port for the azimuth motor. Specify `None` or `False`
-            to not use this motor. Default 4001.
-        el_port (`str`): The port for the elevation motor. Specify `None` or `False`
-            to not use this motor. Default 4002.
-        ip (`str`): Ip address of the ethernet-to-serial interface. Specify `None`
-            or `False` to use comports mode. Default `192.168.127.120`.
+        az_port (`str`, optional): The port for the azimuth motor. Specify
+            `None` or `False` to not use this motor. Default 4001.
+        el_port (`str`, optional): The port for the elevation motor. Specify
+            `None` or `False` to not use this motor. Default 4002.
+        ip (`str`, optional): Ip address of the ethernet-to-serial interface.
+            Specify `None` or `False` to use comports mode.
+            Default `192.168.127.120`.
     """
     def __init__(self, az_port='4001', el_port='4002', ip='192.168.127.120'):
         self.az = None
@@ -177,9 +178,9 @@ class VariSphere:
                     0x0B, Serial, port=el_port, baudrate=9600, timeout=1))
 
     def move(self, az=None, el=None):
-        if az is not None:
+        if self.az is not None and az is not None:
             self.az.move_pos(az)
-        if el is not None:
+        if self.el is not None and el is not None:
             self.el.move_pos(el)
 
     def move_blocking(self, az=None, el=None):
@@ -193,10 +194,16 @@ class VariSphere:
             self.el.stop()
 
     def wait(self):
-        if self.az is not None:
-            self.az.wait_until_position_reached()
-        if self.el is not None:
-            self.el.wait_until_position_reached()
+        while True:
+            try:
+                if self.az is not None:
+                    self.az.wait_until_position_reached()
+                if self.el is not None:
+                    self.el.wait_until_position_reached()
+                break  # position reached
+            except (schunk.SchunkError, schunk.SchunkSerialError):
+                # catch e.g. "SchunkError: CMD INFO: INFO TIMEOUT (0x10)"
+                pass  # retry infinitely
 
     def reset(self):
         if self.az is not None:
