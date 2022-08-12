@@ -1,5 +1,7 @@
 import queue
+import signal
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 
 import numpy as np
@@ -163,8 +165,7 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
     t_data = np.linspace(0, n_sample / fs, n_sample)  # in samples
     time_data = 20 * np.log10(np.abs(data)) if is_etc else data
     f_data = np.fft.rfftfreq(n_sample, 1 / fs)  # in Hz
-    spec_data = 20 * \
-        np.log10(np.abs(np.fft.rfft(data)) / np.sqrt(fs * n_sample))
+    spec_data = 20 * np.log10(np.abs(np.fft.rfft(data)) / np.sqrt(fs * n_sample))
     # in dB, scaled according to the DFT power spectral density for broadband
     # signals
 
@@ -209,8 +210,7 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
         ax = axes[ch, 1]
         ax.semilogx(f_data, spec_data[ch_plot, :].T)
         ax.set_xlim(20, fs / 2)  # in Hz
-        ax.set_ylim(y_max -
-                    (_MAG_DR[1] if is_stacked else _MAG_DR[0]), y_max)  # in dB
+        ax.set_ylim(y_max - (_MAG_DR[1] if is_stacked else _MAG_DR[0]), y_max)  # in dB
         ax.grid()
         ax.set_xlabel("Frequency (Hz)" if ch >= n_ch - 1 else "")
         ax.set_ylabel("PSD Magnitude (dB)")
@@ -226,8 +226,7 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
                 mode="magnitude",
                 scale="dB",
             )
-            specs_peak = np.ceil(
-                20 * np.log10(np.max(np.abs(specs))) / 5) * 5  # in dB
+            specs_peak = np.ceil(20 * np.log10(np.max(np.abs(specs))) / 5) * 5  # in dB
             ax.set_yscale("log")
             ax.set_ylim(100, fs / 2)  # in Hz
             ax.set_xlabel("Time (s)" if ch >= n_ch - 1 else "")
@@ -236,3 +235,25 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
             img.set_clim(specs_peak - _MAG_DR[1], specs_peak)  # in dB
 
     plt.show()
+
+
+@contextmanager
+def timeout(duration):
+    """
+    Args:
+        duration (`float`): Number of seconds given to the context until a
+            timout exception is raised. `float` values will be rounded up to
+            full seconds.
+
+    Raises:
+        TimeoutError
+    """
+    # from https://stackoverflow.com/a/63546765
+    def timeout_handler(_, __):
+        raise TimeoutError(f"timed out after {duration:d} seconds")
+
+    duration = int(np.ceil(duration))
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(duration)
+    yield
+    signal.alarm(0)
