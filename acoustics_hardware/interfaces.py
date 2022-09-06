@@ -160,7 +160,7 @@ class DummyInterface(_StreamedInterface):
         frames = 0
         while self._running.is_set() and frames < self.maxframes:
             frames += 1
-            frame = self._upstream.request(self.framesize)
+            frame = self._upstream.request(_core.FrameRequest(self.framesize))
             if self.realtime:
                 time.sleep(self.framesize / self.samplerate)
             self._downstream.push(frame)

@@ -5,7 +5,13 @@ import fractions
 def _apply_to_signals(func, signals):
     if isinstance(signals, np.ndarray):
         return func(signals)
-    return tuple(func(signal) for signal in signals)
+    try:
+        return tuple(func(signal) for signal in signals)
+    except TypeError as err:
+        if str(err).endswith('object is not iterable'):
+            return func(signals)
+        else:
+            raise
 
 
 def _length_parser(length, samplerate):

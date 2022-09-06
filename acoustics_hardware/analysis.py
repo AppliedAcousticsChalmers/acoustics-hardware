@@ -4,7 +4,7 @@ from . import signal_tools
 
 
 def dB(x, power=False, safe_zeros=True):
-    if safe_zeros:
+    if safe_zeros and np.size(x) > 1:
         x = signal_tools.nonzero_signals(x)
     if power:
         if np.any(x < 0):
