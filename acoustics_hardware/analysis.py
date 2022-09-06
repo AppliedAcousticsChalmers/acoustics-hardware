@@ -210,6 +210,21 @@ def mls_analysis(reference, output):
     order = np.round(np.log2(seq_len + 1)).astype(int)
     reps = int(output.shape[1] / seq_len)
 
+    # Handle different reference mappings
+    ref_check = np.sum(reference)
+    if ref_check == 1:
+        # Mapped with (0, 1) -> (-1, 1)
+        reference = (reference + 1) / 2
+    elif ref_check == -1:
+        # Mapped with (0, 1) -> (1, -1)
+        reference = (1 - reference) / 2
+    elif ref_check == 2**(order - 1) - 1:
+        # Mapped with (0, 1) -> (1, 0)
+        reference = 1 - reference
+
+    if np.sum(reference) != 2**(order - 1):
+        raise ValueError('MLS reference sequence is not a single iteration of a valid MLS')
+
     if reps > 1:
         response = output[:, seq_len:reps * seq_len].reshape((-1, reps - 1, seq_len)).mean(axis=1)
     else:
