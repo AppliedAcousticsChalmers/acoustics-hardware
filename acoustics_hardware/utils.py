@@ -109,8 +109,8 @@ def plot_grid(coords_az_el_r_rad, title=None, is_show_lines=False):
         coords_az_el_r_rad[0], coords_az_el_r_rad[1], coords_az_el_r_rad[2]
     )  # as (x, y, z) in ms
 
-    plt.figure(title, figsize=(8, 8))
-    ax = plt.gca(projection="3d")
+    fig = plt.figure(title, figsize=(8, 8))
+    ax = plt.axes(fig, projection="3d")
 
     if is_show_lines:
         ax.plot3D(x, y, z)
@@ -140,9 +140,10 @@ def plot_grid(coords_az_el_r_rad, title=None, is_show_lines=False):
 @np.errstate(divide="ignore")
 def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
     # in dB, second value if `is_stacked` or first value otherwise
-    _MAG_DR = [80, 120]
+    _ETC_DR = [60, 90]
     # in dB, second value if `is_stacked` or first value otherwise
-    _ETC_DR = [50, 100]
+    _MAG_DR = [60, 60]
+    _MAG_SPECTROGRAM_DR = 110  # in dB
 
     data = np.atleast_2d(data)
     if not np.count_nonzero(data) or np.isnan(data).all():
@@ -197,7 +198,7 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
             ax.legend(label, loc="upper right")
         ax.set_xlabel("Time (s)" if ch >= n_ch - 1 else "")
         if is_etc:
-            y_max = np.ceil((time_data[ch_plot, :].max() / 5) + 1) * 5
+            y_max = np.ceil(time_data[ch_plot, :].max() / 5) * 5
             ax.set_ylim(
                 y_max - (_ETC_DR[1] if is_stacked else _ETC_DR[0]), y_max
             )  # in dB
@@ -206,7 +207,7 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
             ax.set_ylabel("Amplitude")
 
         # Frequency domain
-        y_max = np.ceil((spec_data[ch_plot, :].max() / 5) + 1) * 5
+        y_max = np.ceil(spec_data[ch_plot, :].max() / 5) * 5
         ax = axes[ch, 1]
         ax.semilogx(f_data, spec_data[ch_plot, :].T)
         ax.set_xlim(20, fs / 2)  # in Hz
@@ -232,7 +233,7 @@ def plot_data(data, fs, ch_labels=None, is_stacked=False, is_etc=True):
             ax.set_xlabel("Time (s)" if ch >= n_ch - 1 else "")
             ax.set_ylabel("Frequency (Hz)")
             plt.colorbar(mappable=img, ax=ax, label="Magnitude (dB)")
-            img.set_clim(specs_peak - _MAG_DR[1], specs_peak)  # in dB
+            img.set_clim(specs_peak - _MAG_SPECTROGRAM_DR, specs_peak)  # in dB
 
     plt.show()
 
