@@ -109,8 +109,8 @@ def plot_grid(coords_az_el_r_rad, title=None, is_show_lines=False):
         coords_az_el_r_rad[0], coords_az_el_r_rad[1], coords_az_el_r_rad[2]
     )  # as (x, y, z) in ms
 
-    fig = plt.figure(title, figsize=(8, 8))
-    ax = plt.axes(fig, projection="3d")
+    plt.figure(title, figsize=(8, 8))
+    ax = plt.subplot(projection="3d")
 
     if is_show_lines:
         ax.plot3D(x, y, z)
