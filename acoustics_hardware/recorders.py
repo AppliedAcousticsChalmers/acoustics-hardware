@@ -40,7 +40,14 @@ class InternalRecorder(_Recorder):
 
 class ZArrRecorder(_Recorder):
     timeout = 1
-    def __init__(self, filename=None, mode='w-', chunksize=50000, threaded=False, series_written_message=False, chunk_written_message=False, **kwargs):
+    def __init__(
+        self,
+        filename=None,
+        mode='w-',
+        chunksize=50000,
+        threaded=False,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         if filename is None:
             filename = timestamps.timestamp('filename')
@@ -53,8 +60,6 @@ class ZArrRecorder(_Recorder):
             raise FileExistsError(f"File {self.filename} already exists on disk, use overwriting ('w') or appending ('a') mode if desired.")
         self.chunksize = chunksize
         self.threaded = threaded
-        self.series_written_message = series_written_message
-        self.chunk_written_message = chunk_written_message
 
     def to_dict(self):
         return super().to_dict() | dict(
@@ -62,8 +67,6 @@ class ZArrRecorder(_Recorder):
             chunksize=self.chunksize,
             thereaded=self.threaded,
             mode=self.mode,
-            series_written_message=self.series_written_message,
-            chunk_written_message=self.chunk_written_message,
         )
 
     def setup(self, **kwargs):
@@ -74,8 +77,12 @@ class ZArrRecorder(_Recorder):
             self._stop_event = threading.Event()
             self._thread.start()
         else:
-            self.writer = self.initizlize_writer()
+            self.writer = self.initialize_writer()
             self.writer.send(None)
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._is_ready = False
 
     def process(self, frame):
         if not self._is_ready:
@@ -90,66 +97,87 @@ class ZArrRecorder(_Recorder):
                     pass
         return frame
 
-    def initizlize_writer(self):
-        chunksize = self.chunksize
-        # shape and chunksize will be ignored if the file exists and mode is append
-        storage = zarr.hierarchy.open_group(self.filename, mode=self.mode)
+    def initialize_writer(self):
+        self.store = zarr.storage.DirectoryStore(self.filename)
 
         frame = (yield)
         channels, framesize = frame.frame.shape
-        n_series = 0
-        z = None
+        chunksize = self.chunksize
+
+        buffer = np.zeros((channels, chunksize))
+        self.data = zarr.open_array(
+            store=self.store,
+            mode=self.mode,
+            shape=(0, channels, 0),
+            chunks=(1, 1, chunksize),
+        )
+        self.data.attrs['samplerate'] = self.samplerate
+        self.data.attrs['pipeline'] = self._pipeline.to_dict()
+        buffer_idx = 0
+        shot_idx = -1
         while not isinstance(frame, _core.LastFrame):
+            if frame is None:
+                frame = (yield)
             channels, framesize = frame.frame.shape
-            if z is None:
-                z = storage.create(
-                    name=timestamps.timestamp('filename', microseconds=True),
-                    shape=(channels, 0), chunks=(1, chunksize), dtype=frame.frame.dtype,
-                    compressor=None,
-                )
-                buffer = np.zeros(shape=(channels, chunksize), dtype=frame.frame.dtype)
-                write_idx = 0
-                z.attrs['samplerate'] = self.samplerate
-                z.attrs['pipeline'] = self._pipeline.to_dict()
 
-            if isinstance(frame, _core.GateCloseFrame):
-                # Gate just closed on this frame,
-                # write what's in the buffer as well this frame and close the array store
-                z.append(buffer[:, :write_idx], axis=1)
-                z.append(frame.frame, axis=1)
-                n_series += 1
-                if self.series_written_message:
-                    print(f'Finished time series no. {n_series} with {z.shape[1] / self.samplerate:.3f} seconds', flush=True)
-                z = None  # Indicates that we should start a new series
-                frame = (yield)
-            elif framesize < chunksize - write_idx:
-                # We can write the entire frame to the buffer
-                buffer[:, write_idx:write_idx + framesize] = frame.frame
-                write_idx += framesize
-                # Get a new frame
-                frame = (yield)
+            if isinstance(frame, _core.GateOpenFrame) or shot_idx == -1:
+                assert buffer_idx == 0, "There seems to be data in the buffer at the start of a shot recording!"
+                shot_idx += 1
+                _shots, _channels, _samples = self.data.shape
+                self.data.resize((_shots + 1, _channels, _samples))
+                write_idx = 0
+
+            if framesize < chunksize - buffer_idx:
+                # This frame can fit in the buffer
+                buffer[:, buffer_idx:buffer_idx + framesize] = frame.frame
+                buffer_idx += framesize
+                if isinstance(frame, _core.GateCloseFrame):
+                    # Gate just closed, we should write the frame and then get a new one
+                    frame = None
+                else:
+                    # In the middle of the open segment, just get the next frame without writing to file
+                    frame = None
+                    continue
             else:
-                # The current frame will fill the buffer
-                buffer[:, write_idx:] = frame.frame[:, :chunksize - write_idx]
-                # Write and reset the buffer, keep the rest of the frame
-                z.append(buffer, axis=1)
-                if self.chunk_written_message:
-                    print(f'{z.shape[1] / self.samplerate:.3f} seconds ({z.shape[1]} samples) recorded in this series', flush=True)
-                frame.frame = frame.frame[:, chunksize - write_idx:]
-                write_idx = 0
+                # The frame will fill the buffer
+                buffer[:, buffer_idx:] = frame.frame[:, :chunksize - buffer_idx]
+                if chunksize - buffer_idx < framesize:
+                    # The remainder is kept to next loop iteration
+                    frame.frame = frame.frame[:, chunksize - buffer_idx:]
+                else:
+                    # The frame perfectly fit in the buffer, so we need a new one the next iteration
+                    frame = None
+                buffer_idx = chunksize
 
-        if z is not None:
-            # We got a last frame, which might contain data.
-            # If the series is still open, we should write the data remaining in the buffer,
-            # as well as the data in the last frame.
-            z.append(buffer[:, :write_idx], axis=1)
-            z.append(frame.frame, axis=1)
-        elif frame.frame.size:
-            raise RuntimeError('Got a last frame which has data but the recording series is already closed. This should never happen...')
-        self._is_ready = False
+            # The buffer is full, time to write to file
+            if write_idx + buffer_idx >= self.data.shape[-1]:
+                # Array is too small to hold the entire shot
+                _shots, _channels, _ = self.data.shape
+                _samples = write_idx + buffer_idx
+                _samples = _samples + (-_samples % chunksize)
+                self.data.resize((_shots, _channels, _samples))
+            self.data[shot_idx, :, write_idx:write_idx + buffer_idx] = buffer[:, :buffer_idx]
+            write_idx += buffer_idx
+            buffer_idx = 0
+
+    def zip_store(self):
+        zipname = self.filename + '.zip'
+        if os.path.exists(zipname):
+            if self.mode == 'w':
+                os.remove(zipname)
+            else:
+                raise FileExistsError(f"Cannot zip data to existing file '{zipname}'. Merging recordings is not supported.")
+        zip_store = zarr.storage.ZipStore(
+            zipname,
+            compression=zarr.storage.zipfile.ZIP_DEFLATED,
+        )
+        zarr.copy_store(self.store, zip_store)
+        zarr.storage.rmdir(self.store)
+        self.store = zip_store
+        self.data = zarr.open_array(self.store)
 
     def threaded_writer(self):
-        writer = self.initizlize_writer()
+        writer = self.initialize_writer()
         writer.send(None)
 
         while not self._stop_event.is_set():
