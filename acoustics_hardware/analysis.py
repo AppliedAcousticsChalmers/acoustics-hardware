@@ -8,7 +8,10 @@ def dB(x, power=False, safe_zeros=True):
         x = signal_tools.nonzero_signals(x)
     if power:
         if np.any(x < 0):
-            return 10 * np.log10(x + 0j)
+            if power == 'imag':
+                return 10 * np.log10(x + 0j)
+            if power == 'nan':
+                return 10 * np.log10(np.where(x > 0, x, np.nan))
         return 10 * np.log10(x)
     else:
         return 20 * np.log10(np.abs(x))
