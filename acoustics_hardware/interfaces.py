@@ -263,7 +263,7 @@ class AudioInterface(_StreamedInterface):
             self._stream = sd.OutputStream(
                 samplerate=self.samplerate,
                 blocksize=self.framesize,
-                device=self._output_device['name'],
+                device=self._output_device['index'],
                 channels=num_output_ch,
                 callback=callback,
             )
@@ -347,7 +347,7 @@ class NationalInstrumentsConfigurableChannel(SimpleChannel):
             configs['max_val'] = max_val
         if self.terminal_config is not None:
             if 'diff' in self.terminal_config.lower():
-                configs['terminal_config'] = nidaqmx.constants.TerminalConfiguration.BAL_DIFF
+                configs['terminal_config'] = nidaqmx.constants.TerminalConfiguration.DIFF
             elif 'single' in self.terminal_config.lower():
                 configs['terminal_config'] = nidaqmx.constants.TerminalConfiguration.RSE
             else:
