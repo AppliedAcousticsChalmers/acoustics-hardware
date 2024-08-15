@@ -21,7 +21,7 @@ Once installed, you can use the following steps to receive and use this branch o
 | ``cd acoustics-hardware/``
 
 | Create a `Conda`_ environment with the toolbox and the required dependencies:
-| ``conda env create --file environment.yml --force``
+| ``conda env create --file environment.yml --yes``
 
 | Activate the environment:
 | ``conda activate acoustics-hardware-dev``
@@ -34,8 +34,8 @@ Use the following steps to run the provided `Jupyter`_ notebook examples to perf
 
 | Start the `Jupyter`_ server and open the desired example, e.g.:
 | ``jupyter notebook examples/measurement_single_microphone.ipynb``
-| ``jupyter notebook examples/measurement_DH_on_turntable.ipynb.ipynb``
-| ``jupyter notebook examples/measurement_sequential_SMA.ipynb.ipynb``
+| ``jupyter notebook examples/measurement_DH_on_turntable.ipynb``
+| ``jupyter notebook examples/measurement_sequential_SMA.ipynb``
 
 
 .. _Conda: https://conda.io/en/master/miniconda.html
